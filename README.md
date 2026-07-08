@@ -89,4 +89,4 @@ This CLI began life as an [AFK](https://github.com/griffinwork40/agent-afk) agen
 
 ## License
 
-No license has been chosen yet — all rights reserved by default until one is added. If you'd like to use this, open an issue.
+[MIT](LICENSE) © 2026 Griffin Long
