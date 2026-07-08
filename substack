@@ -1,0 +1,18 @@
+#!/usr/bin/env python3
+"""substack — Substack CLI (unofficial API wrapper)"""
+import sys
+import os
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+# Import command modules FIRST so their @app.command() / @x_app.command()
+# decorators register before main() invokes the Typer app.
+from substack_cli import config as _config  # noqa: E402, F401
+from substack_cli import read as _read      # noqa: E402, F401
+from substack_cli import publish as _publish  # noqa: E402, F401
+from substack_cli import manage as _manage    # noqa: E402, F401
+
+from substack_cli.app import main  # noqa: E402
+
+if __name__ == "__main__":
+    main()

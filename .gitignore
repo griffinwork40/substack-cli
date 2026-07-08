@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+.installed.cfg
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Test / coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.cache/
+
+# Local config / secrets (the CLI persists cookies to ~/.config/substack-cli/,
+# never inside the repo — this is belt-and-suspenders)
+config.json
+.env
+.env.*
+*.cookies
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
