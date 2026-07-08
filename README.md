@@ -17,7 +17,7 @@ afk plugin install griffinwork40/substack-cli
 This registers the `substack` skill, available in every AFK session. The CLI's Python dependencies (typer, httpx, rich) install once from the plugin's bundled requirements file:
 
 ```bash
-pip install -r ~/.afk/plugins/cache/substack-cli/skills/substack/scripts/requirements.txt
+pip install -r ~/.afk/plugins/substack-cli/skills/substack/scripts/requirements.txt
 ```
 
 ### As a standalone CLI
