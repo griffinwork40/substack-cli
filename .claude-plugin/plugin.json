@@ -1,0 +1,12 @@
+{
+  "name": "substack-cli",
+  "description": "CLI for Substack's unofficial private API — read publication content (archive, posts, feed, comments, search, analytics) and manage a publication you own (drafts, publishing, comments, subscribers, recommendations, tags).",
+  "version": "1.0.0",
+  "author": {
+    "name": "Griffin Long",
+    "email": "griffinwork40@gmail.com"
+  },
+  "repository": "https://github.com/griffinwork40/substack-cli",
+  "license": "MIT",
+  "keywords": ["substack", "cli", "newsletter", "api", "afk", "skill"]
+}

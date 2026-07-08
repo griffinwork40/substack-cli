@@ -1,10 +1,38 @@
 # substack-cli
 
-A command-line tool for reading and managing [Substack](https://substack.com) publications, wrapping Substack's undocumented private API — the same `/api/v1/` endpoints the Substack web app itself uses.
+An [AFK](https://github.com/griffinwork40/agent-afk) plugin (and standalone CLI) for reading and managing [Substack](https://substack.com) publications, wrapping Substack's undocumented private API — the same `/api/v1/` endpoints the Substack web app itself uses.
 
 Read-only endpoints (archive, single post, RSS feed) work anonymously. Everything else — publishing drafts, moderating comments, managing subscribers, pulling analytics — uses your browser session cookie.
 
 > ⚠️ **Unofficial.** Substack publishes no public API for content, publishing, or subscriber automation. This tool reverse-engineers the private endpoints, so it can break without notice if Substack changes them. Use it on publications you own, and review Substack's Terms of Use before automating against your account.
+
+## Install
+
+### As an AFK plugin (recommended)
+
+```bash
+afk plugin install griffinwork40/substack-cli
+```
+
+This registers the `substack` skill, available in every AFK session. The CLI's Python dependencies (typer, httpx, rich) install once from the plugin's bundled requirements file:
+
+```bash
+pip install -r ~/.afk/plugins/cache/substack-cli/skills/substack/scripts/requirements.txt
+```
+
+### As a standalone CLI
+
+Requires Python 3.11+.
+
+```bash
+git clone https://github.com/griffinwork40/substack-cli.git
+cd substack-cli/skills/substack/scripts
+pip install -r requirements.txt
+
+# Optional: put `substack` on your PATH
+ln -s "$(pwd)/substack" /usr/local/bin/substack
+substack --help
+```
 
 ## Features
 
@@ -16,44 +44,11 @@ Read-only endpoints (archive, single post, RSS feed) work anonymously. Everythin
 - **Analytics:** per-post and publication-level stats.
 - **Machine-friendly:** compact JSON to stdout by default (`--pretty` for a Rich table/panel); errors are JSON on stderr with a nonzero exit code.
 
-## Install
-
-Requires Python 3.11+.
-
-```bash
-git clone https://github.com/griffinwork40/substack-cli.git
-cd substack-cli
-pip install -r requirements.txt
-
-# Optional: put `substack` on your PATH
-ln -s "$(pwd)/substack" /usr/local/bin/substack
-```
-
-## Quick start
-
-Public, no auth required:
-
-```bash
-# List the most recent posts in a publication's archive
-substack archive --publication-url https://example.substack.com
-
-# Fetch a single post by slug
-substack post my-post-slug --publication-url https://example.substack.com
-
-# Pull the RSS feed
-substack feed --publication-url https://example.substack.com
-```
-
-See all commands with `substack --help`:
-
-```
-archive  post  feed  search  whoami  categories  sections  image-upload
-config   drafts  comments  subscribers  recommendations  tags  publication  analytics
-```
+Full command list: `substack --help`.
 
 ## Authentication
 
-Authenticated operations need your Substack **session cookie** (Substack uses cookies, not API tokens). Full extraction walkthrough: [`references/auth-setup.md`](references/auth-setup.md).
+Authenticated operations need your Substack **session cookie** (Substack uses cookies, not API tokens). Full extraction walkthrough: [`skills/substack/references/auth-setup.md`](skills/substack/references/auth-setup.md).
 
 In short:
 
@@ -74,18 +69,29 @@ substack whoami
 
 Cookies are stored at `~/.config/substack-cli/config.json` — **outside** this repo — and are never committed. Treat the cookie string like a password; it grants full access to your account.
 
+## Repository layout
+
+```
+substack-cli/
+├── .claude-plugin/plugin.json        # AFK plugin manifest
+├── skills/substack/
+│   ├── SKILL.md                      # skill manifest (agent-facing usage)
+│   ├── references/                   # API map + auth-setup guide
+│   └── scripts/                      # the Python CLI (substack_cli/ + tests/)
+├── docs/DEVELOPMENT.md               # architecture & contributor guide
+├── README.md
+└── LICENSE
+```
+
 ## Development
 
 ```bash
+cd skills/substack/scripts
 pip install -r requirements-dev.txt
 pytest -q          # 173 tests, all HTTP mocked — no real network calls
 ```
 
-Architecture, auth model, two-host routing, and a guide to adding new endpoints live in [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md). The API surface is mapped in [`references/substack-api.md`](references/substack-api.md).
-
-## Provenance
-
-This CLI began life as an [AFK](https://github.com/griffinwork40/agent-afk) agent skill; [`SKILL.md`](SKILL.md) is the original skill manifest, kept for reference.
+Architecture, auth model, two-host routing, and a guide to adding new endpoints live in [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md). The API surface is mapped in [`skills/substack/references/substack-api.md`](skills/substack/references/substack-api.md).
 
 ## License
 

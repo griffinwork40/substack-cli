@@ -83,7 +83,7 @@ from substack_cli.app import app
 
 3. **Register the CLI command**: Add a `@app.command(...)` or `@<subapp>.command(...)` function in the same module. Follow the pattern: resolve auth → check write gate → create client → call function → output result → handle errors.
 
-4. **Run tests**: `pytest -q` from the repo root. All tests must pass.
+4. **Run tests**: `pytest -q` from `skills/substack/scripts/`. All tests must pass.
 
 5. **Update docs**: Add the command to `SKILL.md` (Claude-facing) and `references/substack-api.md` (API reference).
 

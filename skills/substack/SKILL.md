@@ -28,13 +28,14 @@ subscriber automation, so this wraps the same private endpoints the
 Substack web app itself uses. Read-only endpoints (archive, single post,
 RSS feed) work anonymously; everything else needs a session cookie.
 
-**Binary location:** `substack` (install: `ln -s
-~/.afk/skills/substack/scripts/substack /usr/local/bin/substack`)
+**Binary location:** `substack` at
+`${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/skills/substack/scripts/substack`
+(optional: `ln -s "${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/skills/substack/scripts/substack" /usr/local/bin/substack`)
 **API base:** `https://{your-subdomain}.substack.com/api/v1/` (some routes
 require the bare `https://substack.com` host instead — the CLI handles
 this automatically per command).
 **Python deps:** `pip install -r
-~/.afk/skills/substack/scripts/requirements.txt` (typer, httpx, rich)
+"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/skills/substack/scripts/requirements.txt"` (typer, httpx, rich)
 
 ## Setup & Authentication
 
