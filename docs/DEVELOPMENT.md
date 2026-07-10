@@ -29,6 +29,7 @@ ln -s "$(pwd)/substack" /usr/local/bin/substack
 | `read.py` | All GET/read commands (archive, posts, feed, comments, search, stats, analytics) | `client.py`, `app.py` (registers commands) |
 | `publish.py` | Draft CRUD, publish/schedule lifecycle, image upload, MD→ProseMirror | `client.py`, `app.py` (registers commands) |
 | `manage.py` | Comments, reactions, subscribers, recommendations, tags, pub settings | `client.py`, `app.py` (registers commands) |
+| `notes.py` | Substack Notes CRUD (create/list/get/delete) + note bodyJson builder | `client.py`, `app.py`, `publish.py` (reuses `_parse_inline`) |
 | `app.py` | Root Typer app, subapp wiring, `config test` command, `main()` error wrapper | all (composition root) |
 
 ## Import Graph
@@ -38,9 +39,10 @@ app.py ──registers──> config.py
                   └-> read.py    -> client.py -> auth.py -> config.py
                   └-> publish.py -> client.py
                   └-> manage.py  -> client.py
+                  └-> notes.py   -> client.py, publish.py (_parse_inline)
 
 Entry point (substack script):
-  substack -> imports config, read, publish, manage (registers commands)
+  substack -> imports config, read, publish, manage, notes (registers commands)
            -> imports app.main() -> calls app()
 ```
 
@@ -51,7 +53,7 @@ import the command modules at module level to avoid circular dependencies
 the command modules explicitly:
 
 ```python
-from substack_cli import config, read, publish, manage  # ensure registration
+from substack_cli import config, read, publish, manage, notes  # ensure registration
 from substack_cli.app import app
 ```
 
@@ -62,7 +64,7 @@ from substack_cli.app import app
   - `SUBSTACK_COOKIES_STRING` env var → `~/.config/substack-cli/config.json` `cookies_string` key
   - `SUBSTACK_PUBLICATION_URL` env var → config `publication_url` key
 - **Write gate**: `SUBSTACK_ENABLE_WRITE=true` env var OR `enable_write: true` config key
-- **`--yes` flag**: required for `drafts delete/publish`, `comments delete`, `subscribers remove`, `recommendations remove`, `tags delete`
+- **`--yes` flag**: required for `drafts delete/publish`, `comments delete`, `subscribers remove`, `recommendations remove`, `tags delete`, `notes create` (publishes immediately, no edit/undo), `notes delete`
 
 ## Output Conventions
 
@@ -98,7 +100,7 @@ from substack_cli.app import app
 ## Deferred / Out of Scope for v1
 
 See `references/substack-api.md` § Deferred. Highlights:
-- Substack Notes (microblog content type orthogonal to newsletter posts)
+- Substack Notes *editing* — create/list/get/delete are implemented (`notes` subapp); the API has no edit endpoint (notes publish immediately, no draft/undo), so "edit" means delete-then-recreate
 - Full Markdown→ProseMirror (lists, images, footnotes, paywall markers, embeds)
 - Messaging/Chat/DMs, Stripe/pledges, cross-publication discovery
 - OAuth / programmatic login flows

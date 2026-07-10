@@ -40,6 +40,7 @@ substack --help
 - **Search & discovery:** search a publication's archive, list categories and sections.
 - **Publishing:** create / edit / delete drafts, publish or schedule posts, upload images (Markdown → ProseMirror conversion).
 - **Moderation:** manage comments and reactions.
+- **Notes:** create, list, read, and delete Substack Notes (no edit — the API has no note-update endpoint; notes publish immediately).
 - **Audience:** manage subscribers, cross-publication recommendations, and post tags.
 - **Analytics:** per-post and publication-level stats.
 - **Machine-friendly:** compact JSON to stdout by default (`--pretty` for a Rich table/panel); errors are JSON on stderr with a nonzero exit code.
