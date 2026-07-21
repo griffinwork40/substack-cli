@@ -96,6 +96,8 @@ substack subscribers count                         # subscriber count / growth s
 substack subscribers stats                          # detailed subscriber stats (fixed 25-row sample, not a full enumeration — see caveat below)
 substack analytics post 204779662                  # POST METADATA only — no engagement fields (see caveat below)
 substack analytics summary                          # publish dashboard summary
+substack analytics posts --sort signups --limit 25  # rank published posts by a metric (signups|open_rate|views|opens|clicks) — see caveat
+substack analytics digest --top 5                   # "what's working": top posts by signups + publication summary (ranked JSON)
 substack comments list 204779662                   # reader comments on a post
 substack whoami                                    # confirm which account the cookie belongs to
 substack categories                                 # list all Substack categories
@@ -112,6 +114,12 @@ substack leaderboard 76739 --pretty                # numeric category id also ac
 - `subscribers stats` always requests `limit:25/offset:0` and returns
   that **fixed 25-row sample** — it has no pagination and is not a full
   subscriber enumeration.
+- `analytics posts` / `analytics digest` list posts from `archive` and pull
+  per-post stats from `post_management/detail` (N+1). **The engagement stat
+  shape is UNVERIFIED** — per the `analytics post` caveat above that endpoint
+  may return metadata only, in which case ranking falls back to `0` and posts
+  are still listed (unranked). Confirm the real `stats` shape with the Phase-0
+  spike before relying on the ranking. See `docs/plans/amplify-content-flywheel.md`.
 
 ### Drafting & publishing
 

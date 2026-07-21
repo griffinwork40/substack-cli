@@ -302,6 +302,111 @@ def get_post_analytics(client: SubstackClient, post_id: int) -> dict:
     return client.get(f"/api/v1/post_management/detail/{post_id}")
 
 
+# --- Bulk analytics + digest (Milestone 1: the flywheel's Analyze step) -----
+#
+# Defensive-by-design: the post list comes from the *verified* public archive
+# endpoint, and per-post engagement stats from the *verified*
+# post_management/detail endpoint (N+1 calls; the client throttles). A Phase-0
+# spike may later show GET /api/v1/post_management/published carries a per-post
+# `stats` block, collapsing this to ONE call — if so, swap the list source in
+# get_posts_analytics() and drop the per-post loop. The exact upstream stat
+# field names are unverified, so _extract_post_stats/_stat_value tolerate
+# several envelope shapes and spellings. See
+# docs/plans/amplify-content-flywheel.md (Phase 0, Milestone 1).
+
+# Field-name aliases per sort metric; first present wins, else 0.
+_STAT_SORT_FIELDS: dict = {
+    "signups": ("signups", "free_signups", "total_signups", "new_free_subscriptions"),
+    "open_rate": ("open_rate", "email_open_rate", "opens_rate"),
+    "views": ("views", "total_views", "web_views"),
+    "opens": ("opens", "email_opens", "unique_opens"),
+    "clicks": ("clicks", "total_clicks", "unique_clicks"),
+}
+
+
+def _extract_post_stats(detail: Any) -> dict:
+    """Pull the engagement-stats dict out of a post_management/detail response,
+    tolerating a nested {"stats": {...}} envelope, a single-item
+    {"posts": [ {...} ]} list, or a top-level metrics object."""
+    if not isinstance(detail, dict):
+        return {}
+    stats = detail.get("stats")
+    if isinstance(stats, dict):
+        return stats
+    posts = detail.get("posts")
+    if isinstance(posts, list) and posts and isinstance(posts[0], dict):
+        inner = posts[0].get("stats")
+        return inner if isinstance(inner, dict) else posts[0]
+    return detail
+
+
+def _stat_value(stats: dict, sort: str) -> float:
+    """Numeric value for a sort metric, tolerant of field-name variance; 0 when absent."""
+    if not isinstance(stats, dict):
+        return 0.0
+    for key in _STAT_SORT_FIELDS.get(sort, (sort,)):
+        val = stats.get(key)
+        if isinstance(val, bool):  # bools are ints in Python — skip them
+            continue
+        if isinstance(val, (int, float)):
+            return float(val)
+    return 0.0
+
+
+def get_posts_analytics(
+    client: SubstackClient, *, limit: int = 25, sort: str = "signups"
+) -> list:
+    """Rank published posts by an engagement metric.
+
+    `sort` ∈ {signups, open_rate, views, opens, clicks}. Lists posts from the
+    archive, fetches per-post stats, and returns objects
+    {id, title, slug, post_date, stats} sorted descending by `sort` (missing
+    metric → 0, post still listed). Degrades gracefully: a post whose detail
+    call fails is kept with stats={}."""
+    if sort not in _STAT_SORT_FIELDS:
+        raise ValueError(f"sort must be one of: {', '.join(_STAT_SORT_FIELDS)}")
+    posts = get_archive(client, sort="new", offset=0, limit=limit)
+    ranked: list = []
+    for post in posts:
+        if not isinstance(post, dict):
+            continue
+        post_id = post.get("id")
+        stats: dict = {}
+        if post_id is not None:
+            try:
+                detail = client.get(
+                    f"/api/v1/post_management/detail/{post_id}", offset=0, limit=1
+                )
+                stats = _extract_post_stats(detail)
+            except SubstackApiError:
+                stats = {}  # degrade: keep the post, drop its stats
+        ranked.append(
+            {
+                "id": post_id,
+                "title": post.get("title"),
+                "slug": post.get("slug"),
+                "post_date": post.get("post_date"),
+                "stats": stats,
+            }
+        )
+    ranked.sort(key=lambda r: _stat_value(r["stats"], sort), reverse=True)
+    return ranked
+
+
+def get_digest(client: SubstackClient, *, top: int = 5) -> dict:
+    """Compose a 'what's working' digest: the publication summary plus the top
+    posts ranked by signups. Emits ranked DATA only — narrative interpretation
+    is left to the caller (the amplify skill)."""
+    summary = get_publish_dashboard_summary(client)
+    posts = get_posts_analytics(client, limit=max(top * 4, 25), sort="signups")
+    return {
+        "ranked_by": "signups",
+        "post_count": len(posts),
+        "top_posts": posts[:top],
+        "summary": summary,
+    }
+
+
 # ---------------------------------------------------------------------------
 # CLI commands
 # ---------------------------------------------------------------------------
@@ -514,6 +619,34 @@ def analytics_post_cmd(post_id: int, pretty: bool = False):
         result = get_post_analytics(client, post_id)
         output(result, pretty=pretty)
     except (SubstackApiError, AuthError) as exc:
+        emit_error(str(exc), status_code=getattr(exc, "status_code", None), pretty=pretty)
+    except Exception as exc:
+        emit_error(f"Unexpected error: {exc}", pretty=pretty)
+
+
+@analytics_app.command("posts")
+def analytics_posts_cmd(
+    limit: int = 25, sort: str = "signups", pretty: bool = False
+):
+    """Rank published posts by an engagement metric (signups|open_rate|views|opens|clicks)."""
+    try:
+        client = _make_client()
+        result = get_posts_analytics(client, limit=limit, sort=sort)
+        output_list(result, pretty=pretty, title=f"Posts by {sort}")
+    except (SubstackApiError, AuthError, ValueError) as exc:
+        emit_error(str(exc), status_code=getattr(exc, "status_code", None), pretty=pretty)
+    except Exception as exc:
+        emit_error(f"Unexpected error: {exc}", pretty=pretty)
+
+
+@analytics_app.command("digest")
+def analytics_digest_cmd(top: int = 5, pretty: bool = False):
+    """'What's working' digest: top posts by signups + publication summary (ranked JSON)."""
+    try:
+        client = _make_client()
+        result = get_digest(client, top=top)
+        output(result, pretty=pretty)
+    except (SubstackApiError, AuthError, ValueError) as exc:
         emit_error(str(exc), status_code=getattr(exc, "status_code", None), pretty=pretty)
     except Exception as exc:
         emit_error(f"Unexpected error: {exc}", pretty=pretty)

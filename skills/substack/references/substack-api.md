@@ -27,6 +27,7 @@ research (all ~55 discovered endpoints), see
 | `subscribers count` / `analytics summary` | GET | `/api/v1/publish-dashboard/summary` | P | Yes (403 anon) | Route confirmed | Subscriber count + open rates |
 | `subscribers stats` | POST | `/api/v1/subscriber-stats` | P | Yes | Single source | **Verb may be wrong** — 404 surfaces clear message |
 | `analytics post` | GET | `/api/v1/post_management/detail/{id}` | P | Yes | Single source | Views/opens/CTR per post |
+| `analytics posts` / `analytics digest` | GET | `/api/v1/archive` + `/api/v1/post_management/detail/{id}` (digest also `/publish-dashboard/summary`) | P | Yes | Composed (N+1) | Ranks published posts by a `stats` metric (signups\|open_rate\|views\|opens\|clicks). **Stat field shape UNVERIFIED** — tolerates nested/inline/`posts[]` shapes and several field spellings; degrades to `0` (post still listed) when absent. Detail call sends `?offset=0&limit=1`. Client throttles the per-post loop. Phase-0 spike may collapse to a single `post_management/published` call — see `docs/plans/amplify-content-flywheel.md`. |
 | `drafts list` | GET | `/api/v1/drafts` | P | Yes | Confirmed (2+) | **Known breaking change 2026-05**: bare array → `{posts, hasMore, nextCursor}`. CLI tolerates both. |
 | `drafts get` | GET | `/api/v1/drafts/{id}` | P | Yes | Confirmed (2+) | — |
 | `drafts create` | POST | `/api/v1/drafts` | P | Yes | Confirmed (2+) | **`draft_body` MUST be a JSON string** — nested dict renders literal text. Auto-derives `byline_ids` from self profile if not supplied. |
