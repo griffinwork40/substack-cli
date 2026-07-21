@@ -93,14 +93,25 @@ substack feed                                      # RSS as parsed JSON
 substack feed --raw                                # raw RSS XML
 substack search "AI infrastructure"                # full-text search (filtering behavior unconfirmed by Substack)
 substack subscribers count                         # subscriber count / growth summary
-substack subscribers stats                          # detailed subscriber stats
-substack analytics post 204779662                  # views/opens/CTR for one post
+substack subscribers stats                          # detailed subscriber stats (fixed 25-row sample, not a full enumeration — see caveat below)
+substack analytics post 204779662                  # POST METADATA only — no engagement fields (see caveat below)
 substack analytics summary                          # publish dashboard summary
 substack comments list 204779662                   # reader comments on a post
 substack whoami                                    # confirm which account the cookie belongs to
 substack categories                                 # list all Substack categories
 substack sections                                   # list publication sections
+substack leaderboard finance --top 10              # top 10 finance newsletters by paid subs (cross-publication, no auth needed)
+substack leaderboard us-politics --rank all         # same category, ranked by total reach instead
+substack leaderboard 76739 --pretty                # numeric category id also accepted (see `substack categories`)
 ```
+
+**Caveats worth knowing before you rely on these:**
+- `analytics post` returns post **metadata** (title, dates, audience, word
+  count) — it does **not** include engagement (reactions/restacks). For
+  engagement data, pull it from the `archive` payload instead.
+- `subscribers stats` always requests `limit:25/offset:0` and returns
+  that **fixed 25-row sample** — it has no pagination and is not a full
+  subscriber enumeration.
 
 ### Drafting & publishing
 
@@ -217,4 +228,8 @@ can 403 a plain HTTP client even with valid cookies (a documented
 browser-vs-curl gap, not necessarily an expired cookie). **Notes cannot be
 edited** — Substack exposes no note-update endpoint, so `notes` supports
 create/list/get/delete only; to change a note, delete it and create a new
-one (a new id is issued).
+one (a new id is issued). **`leaderboard` covers category-level
+cross-publication discovery only** (top 25 per category/rank) — it cannot
+answer per-subscriber questions about a publication you don't own; only
+`finance` and `us-politics` have live-verified slug aliases, everything
+else needs a numeric id from `substack categories`.

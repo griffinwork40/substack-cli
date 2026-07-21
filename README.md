@@ -37,7 +37,7 @@ substack --help
 ## Features
 
 - **Read (no auth):** list the archive, fetch a single post, pull the RSS feed.
-- **Search & discovery:** search a publication's archive, list categories and sections.
+- **Search & discovery:** search a publication's archive, list categories and sections, and pull cross-publication category leaderboards (top 25 publications by paid subscribers, total reach, or growth — no auth needed).
 - **Publishing:** create / edit / delete drafts, publish or schedule posts, upload images (Markdown → ProseMirror conversion).
 - **Moderation:** manage comments and reactions.
 - **Notes:** create, list, read, and delete Substack Notes (no edit — the API has no note-update endpoint; notes publish immediately).
@@ -89,7 +89,7 @@ substack-cli/
 ```bash
 cd skills/substack/scripts
 pip install -r requirements-dev.txt
-pytest -q          # 173 tests, all HTTP mocked — no real network calls
+pytest -q          # 234 tests, all HTTP mocked — no real network calls
 ```
 
 Architecture, auth model, two-host routing, and a guide to adding new endpoints live in [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md). The API surface is mapped in [`skills/substack/references/substack-api.md`](skills/substack/references/substack-api.md).

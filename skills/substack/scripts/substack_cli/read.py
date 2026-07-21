@@ -13,6 +13,7 @@ from substack_cli.auth import (
     resolve_publication_url,
 )
 from substack_cli.client import (
+    SUBSTACK_COM,
     SubstackApiError,
     SubstackClient,
     emit_error,
@@ -35,6 +36,19 @@ def _make_client(anonymous: bool = False) -> SubstackClient:
     """
     cookies = resolve_cookies_optional() if anonymous else resolve_cookies()
     pub_url = resolve_publication_url()
+    return SubstackClient(cookies=cookies, publication_url=pub_url)
+
+
+def _make_leaderboard_client() -> SubstackClient:
+    """Create a client for `leaderboard` — a public, cross-publication,
+    host-'A'-only endpoint. No auth and no configured publication are
+    required (mirrors notes.py's SUBSTACK_COM fallback), since a user
+    should be able to discover OTHER publications without owning one."""
+    cookies = resolve_cookies_optional()
+    try:
+        pub_url = resolve_publication_url()
+    except AuthError:
+        pub_url = SUBSTACK_COM
     return SubstackClient(cookies=cookies, publication_url=pub_url)
 
 
@@ -70,6 +84,138 @@ def list_sections(client: SubstackClient) -> list:
     """List the publication's sections (multi-author/podcast sections).
     Uses the publication's own subdomain (host 'P')."""
     return client.get("/api/v1/publication/sections")
+
+
+# ---------------------------------------------------------------------------
+# Category leaderboard (cross-publication discovery)
+# ---------------------------------------------------------------------------
+
+# Only these two slugs are live-verified against the real category ids —
+# do NOT add more without verifying, since a wrong id silently returns a
+# leaderboard for the wrong category rather than erroring.
+LEADERBOARD_CATEGORY_ALIASES = {
+    "finance": 153,
+    "us-politics": 76739,
+}
+LEADERBOARD_RANKS = ("paid", "all", "rising")
+
+
+def _resolve_leaderboard_category(category: str) -> int:
+    """Resolve a `leaderboard` CATEGORY argument to a numeric category id.
+
+    Accepts a numeric id directly (always correct — discover ids via
+    `substack categories`), or a live-verified slug alias (finance -> 153,
+    us-politics -> 76739). Anything else raises ValueError with a message
+    naming both remediation paths.
+    """
+    value = category.strip()
+    if value.isdigit():
+        # str.isdigit() is True for some Unicode numeral characters (e.g.
+        # superscript "²", U+00B2) that int() then rejects — fall through
+        # to the alias/error path instead of leaking a raw ValueError.
+        try:
+            return int(value)
+        except ValueError:
+            pass
+
+    alias = LEADERBOARD_CATEGORY_ALIASES.get(value.lower())
+    if alias is not None:
+        return alias
+
+    raise ValueError(
+        "pass a numeric category id (discover ids via `substack categories`) "
+        "or one of: finance, us-politics"
+    )
+
+
+def _extract_plan_prices(plans: Optional[list]) -> tuple:
+    """Given a publication's `plans` array (raw leaderboard shape), return
+    (monthly_usd, yearly_usd) as dollar floats, or None where absent.
+
+    Each plan's `amount` is in CENTS; `interval` is "month" or "year".
+    Founding-member tiers show up as a SECOND, pricier plan on the same
+    interval with no reliable "is founding" flag, so the MINIMUM amount
+    per interval is taken as the standard price. Only usd-denominated
+    plans are considered (all live-observed leaderboard data is usd).
+    """
+    if not plans:
+        return None, None
+
+    def _min_amount(interval: str) -> Optional[float]:
+        amounts = [
+            plan["amount"]
+            for plan in plans
+            if plan.get("interval") == interval
+            and plan.get("currency", "usd") == "usd"
+            and isinstance(plan.get("amount"), (int, float))
+        ]
+        return round(min(amounts) / 100, 2) if amounts else None
+
+    return _min_amount("month"), _min_amount("year")
+
+
+def _parse_subscriber_count(value: Optional[str]) -> Optional[int]:
+    """Parse a comma-formatted subscriber count string (e.g. "774,000") to
+    an int. Returns None if missing or unparseable."""
+    if value is None:
+        return None
+    try:
+        return int(str(value).replace(",", "").strip())
+    except ValueError:
+        return None
+
+
+def get_category_leaderboard(
+    client: SubstackClient, category_id: int, rank: str = "paid"
+) -> list:
+    """Fetch a category's public leaderboard (top 25 publications).
+
+    Uses host 'A' (substack.com) — a PUBLIC endpoint, no auth required.
+    `rank` selects the ranking variant:
+      - "paid" (DEFAULT): ranked by paid-subscriber count (bestsellers).
+        This is what "top N in <category>" almost always means.
+      - "all": ranked by total reach; INCLUDES publications with payments
+        disabled/paused (no `plans`). Produces a DIFFERENT ordering than
+        "paid" — do not substitute this for a paid-bestsellers list.
+      - "rising": newer / fast-growing publications.
+
+    Tolerates the {publications, more, title} envelope via extract_list.
+    """
+    if rank not in LEADERBOARD_RANKS:
+        raise ValueError(
+            f"Invalid rank {rank!r}. Choices: {', '.join(LEADERBOARD_RANKS)}"
+        )
+    data = client.get(f"/api/v1/category/public/{category_id}/{rank}", host="A")
+    return extract_list(data, "publications")
+
+
+def _project_leaderboard_entry(pub: dict, position: int) -> dict:
+    """Project ONE raw (100+ field) leaderboard publication object down to
+    the fields useful for cross-publication comparison. `position` is the
+    1-indexed rank within the requested ordering — the API returns no
+    explicit numeric rank field; order in the response IS the rank.
+
+    NOTE on `freeSubscriberCount`: despite the name, at this endpoint it
+    holds the TOTAL subscriber count (free + paid) — it lines up with the
+    `rankingDetailFreeIncluded` total-subscribers band, not a free-only
+    count. Live-verified against real leaderboard data.
+    """
+    monthly_usd, yearly_usd = _extract_plan_prices(pub.get("plans"))
+    url = pub.get("base_url") or (
+        f"https://{pub['custom_domain']}" if pub.get("custom_domain") else None
+    )
+    return {
+        "rank": position,
+        "name": pub.get("name"),
+        "author": pub.get("author_name"),
+        "url": url,
+        "monthly_usd": monthly_usd,
+        "yearly_usd": yearly_usd,
+        "paid_subscriber_band": pub.get("rankingDetail"),
+        "total_subscribers": _parse_subscriber_count(pub.get("freeSubscriberCount")),
+        "payments_state": pub.get("payments_state"),
+        "bestseller_tier": pub.get("author_bestseller_tier"),
+    }
 
 
 def get_post(client: SubstackClient, slug: str) -> dict:
@@ -256,6 +402,53 @@ def sections_cmd(pretty: bool = False):
         result = list_sections(client)
         output(result, pretty=pretty)
     except (SubstackApiError, AuthError) as exc:
+        emit_error(str(exc), status_code=getattr(exc, "status_code", None), pretty=pretty)
+    except Exception as exc:
+        emit_error(f"Unexpected error: {exc}", pretty=pretty)
+
+
+@app.command("leaderboard")
+def leaderboard_cmd(
+    category: str = typer.Argument(
+        ...,
+        help="Numeric category id (see `substack categories`), or a slug "
+        "alias: finance, us-politics.",
+    ),
+    rank: str = typer.Option(
+        "paid",
+        "--rank",
+        help="Ranking variant: paid (bestsellers by paid subs, DEFAULT), "
+        "all (total reach, includes payments-off pubs), rising (fast-growing).",
+    ),
+    top: int = typer.Option(
+        None, "--top", help="Trim to the first N results (default: all 25)."
+    ),
+    pretty: bool = False,
+):
+    """Cross-publication category leaderboard — top 25 publications ranked
+    by category. Public — works without auth or a configured publication.
+
+    Defaults to --rank paid (bestsellers by paid-subscriber count), which is
+    almost always what "top N in <category>" means. --rank all reorders by
+    total reach and additionally includes publications with payments
+    disabled/paused — a DIFFERENT list, not a superset ordering of `paid`.
+    """
+    try:
+        if rank not in LEADERBOARD_RANKS:
+            raise ValueError(
+                f"Invalid --rank {rank!r}. Choices: {', '.join(LEADERBOARD_RANKS)}"
+            )
+        category_id = _resolve_leaderboard_category(category)
+        client = _make_leaderboard_client()
+        raw = get_category_leaderboard(client, category_id, rank=rank)
+        projected = [
+            _project_leaderboard_entry(pub, position=i + 1)
+            for i, pub in enumerate(raw)
+        ]
+        if top is not None:
+            projected = projected[:top]
+        output_list(projected, pretty=pretty, title=f"Leaderboard: {category} ({rank})")
+    except (SubstackApiError, AuthError, ValueError) as exc:
         emit_error(str(exc), status_code=getattr(exc, "status_code", None), pretty=pretty)
     except Exception as exc:
         emit_error(f"Unexpected error: {exc}", pretty=pretty)
