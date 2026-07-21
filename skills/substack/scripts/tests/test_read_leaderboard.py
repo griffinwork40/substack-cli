@@ -186,6 +186,17 @@ def test_resolve_leaderboard_category_numeric_id_passthrough():
     assert _resolve_leaderboard_category("999999") == 999999
 
 
+def test_resolve_leaderboard_category_unicode_digit_like_char_raises_clear_message():
+    """Regression: '\u00b2' (superscript 2, U+00B2) passes str.isdigit() but
+    int() rejects it — must fall through to the friendly alias/error message
+    instead of leaking a raw 'invalid literal for int()' ValueError."""
+    with pytest.raises(ValueError) as exc_info:
+        _resolve_leaderboard_category("\u00b2")
+    msg = str(exc_info.value)
+    assert "numeric category id" in msg
+    assert "finance" in msg and "us-politics" in msg
+
+
 def test_resolve_leaderboard_category_unknown_slug_raises_clear_message():
     with pytest.raises(ValueError) as exc_info:
         _resolve_leaderboard_category("technology")

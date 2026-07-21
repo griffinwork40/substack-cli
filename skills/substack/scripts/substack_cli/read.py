@@ -110,7 +110,13 @@ def _resolve_leaderboard_category(category: str) -> int:
     """
     value = category.strip()
     if value.isdigit():
-        return int(value)
+        # str.isdigit() is True for some Unicode numeral characters (e.g.
+        # superscript "²", U+00B2) that int() then rejects — fall through
+        # to the alias/error path instead of leaking a raw ValueError.
+        try:
+            return int(value)
+        except ValueError:
+            pass
 
     alias = LEADERBOARD_CATEGORY_ALIASES.get(value.lower())
     if alias is not None:
