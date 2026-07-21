@@ -26,7 +26,7 @@ ln -s "$(pwd)/substack" /usr/local/bin/substack
 | `config.py` | `~/.config/substack-cli/config.json` load/save + `config` subapp | nothing |
 | `auth.py` | Credential resolution (env → config), headers, redaction, hints | `config.py` |
 | `client.py` | `SubstackClient` (HTTP, retries, throttle, errors), `emit_error()`, `output()` | `auth.py`, `models.py` |
-| `read.py` | All GET/read commands (archive, posts, feed, comments, search, stats, analytics) | `client.py`, `app.py` (registers commands) |
+| `read.py` | All GET/read commands (archive, posts, feed, comments, search, stats, analytics, categories/sections, category leaderboard) | `client.py`, `app.py` (registers commands) |
 | `publish.py` | Draft CRUD, publish/schedule lifecycle, image upload, MD→ProseMirror | `client.py`, `app.py` (registers commands) |
 | `manage.py` | Comments, reactions, subscribers, recommendations, tags, pub settings | `client.py`, `app.py` (registers commands) |
 | `notes.py` | Substack Notes CRUD (create/list/get/delete) + note bodyJson builder | `client.py`, `app.py`, `publish.py` (reuses `_parse_inline`) |
@@ -95,7 +95,7 @@ from substack_cli.app import app
 - **No real config file**: `isolated_config` fixture redirects `CONFIG_PATH` to tmp
 - **No real env vars**: `isolated_config` clears `SUBSTACK_*` env vars
 - **No real sleep**: `no_sleep` fixture patches `time.sleep` for retry/throttle tests
-- **173 test cases** across 20 test files (including integration/e2e tests)
+- **234 test cases** across 22 test files (including integration/e2e tests)
 
 ## Deferred / Out of Scope for v1
 

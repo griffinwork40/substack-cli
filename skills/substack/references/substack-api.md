@@ -23,6 +23,7 @@ research (all ~55 discovered endpoints), see
 | `search` | GET | `/api/v1/archive?search=` | P | No* | **Param confirmed, behavior unconfirmed** | Substack may not actually filter — verify results. *CLI requires auth conservatively (filtering unconfirmed); only `archive`/`post`/`feed` run anonymously. |
 | `categories` | GET | `/api/v1/categories` | A | No | **Live-verified** | Global list, not publication-specific |
 | `sections` | GET | `/api/v1/publication/sections` | P | Yes (403 anon) | Route confirmed | — |
+| `leaderboard` | GET | `/api/v1/category/public/{category_id}/{rank}` | A | No (public) | **Live-verified** | Cross-publication category leaderboard, top 25 pubs. `rank` ∈ `paid`\|`all`\|`rising` — see § Category Leaderboard below for the ranking-variant semantics and field shapes. |
 | `subscribers count` / `analytics summary` | GET | `/api/v1/publish-dashboard/summary` | P | Yes (403 anon) | Route confirmed | Subscriber count + open rates |
 | `subscribers stats` | POST | `/api/v1/subscriber-stats` | P | Yes | Single source | **Verb may be wrong** — 404 surfaces clear message |
 | `analytics post` | GET | `/api/v1/post_management/detail/{id}` | P | Yes | Single source | Views/opens/CTR per post |
@@ -65,10 +66,59 @@ is safe. The CLI throttles to 1.0s between requests by default and retries
 ## Two-Host Routing
 
 - **Host "P"** (publication subdomain): default for most endpoints — `https://{subdomain}.substack.com`
-- **Host "A"** (substack.com bare): used for `whoami`, `categories`, and optionally `comments delete`
+- **Host "A"** (substack.com bare): used for `whoami`, `categories`, `leaderboard`, and optionally `comments delete`
 
 The CLI handles this automatically per command — you don't need to specify
 the host manually unless using `comments delete --host A`.
+
+## Category Leaderboard
+
+`GET https://substack.com/api/v1/category/public/{category_id}/{rank}` — a
+**public, unauthenticated** endpoint returning the top 25 publications in a
+category. This is Substack's own leaderboard data source (same one the
+substack.com category pages render), reverse-engineered here for CLI/agent
+consumption.
+
+**Category id**: numeric, discovered via `substack categories`. The CLI
+additionally accepts two live-verified slug aliases as shorthand:
+`finance` → `153`, `us-politics` → `76739`. No other slugs are hardcoded —
+an unrecognized non-numeric string errors instead of guessing.
+
+**`{rank}` path segment** — three variants, each a genuinely different
+ordering (not just a display sort of the same set):
+
+| Rank | Ordered by | Notes |
+|---|---|---|
+| `paid` (CLI default) | Paid-subscriber count | "Bestsellers." What "top N in `<category>`" almost always means. |
+| `all` | Total reach (free + paid) | **Includes publications with payments disabled/paused** (no `plans` array at all) — this is why `all` and `paid` return different publications in different orders, not just a resort. |
+| `rising` | Growth velocity | Newer / fast-growing publications, not necessarily the largest. |
+
+**Why the CLI defaults to `paid`, not `all`**: the two rank variants
+returned genuinely different orderings during endpoint verification —
+`all` surfaced payments-disabled publications ranked by reach alone,
+which produced a wrong "top bestsellers" answer if you assumed ordering
+was uniform. `--rank all`/`--rank rising` remain available for the total-
+reach and growth-rate questions, but the CLI does not assume you meant
+those when you asked for a leaderboard.
+
+**Response shape**: `{"publications": [...], "more": bool, "title": str}`
+(tolerated via the same envelope/bare-list handling as other list
+endpoints). Each publication object carries 100+ fields; the CLI projects
+down to: `rank` (1-indexed position in the response — the API itself
+returns no explicit rank field), `name`, `author`, `url` (from `base_url`,
+falling back to `custom_domain`), `monthly_usd`/`yearly_usd` (parsed from
+`plans[].amount` — **integer cents**, `interval` is `"month"`/`"year"`;
+when a founding-member tier adds a second, pricier plan on the same
+interval, the CLI takes the **minimum** amount per interval as the
+standard price), `paid_subscriber_band` (`rankingDetail`, a banded string
+like `"Hundreds of paid subscribers"`), `total_subscribers` (parsed from
+the confusingly-named `freeSubscriberCount` field, which at this endpoint
+actually holds the **total** free+paid count, not free-only — parsed from
+its comma-formatted string form, e.g. `"774,000"` → `774000`),
+`payments_state`, and `bestseller_tier` (`author_bestseller_tier`). Raw
+100+-field objects are never emitted — a full category response is ~4MB,
+so tests and any manual inspection must use a small hand-built fixture,
+never the live payload.
 
 ## Deferred / Out of Scope for v1
 
@@ -76,6 +126,6 @@ the host manually unless using `comments delete --host A`.
 - Full Markdown→ProseMirror (lists, images-in-body, footnotes, paywall markers, embeds)
 - Messaging/Chat/DMs
 - Stripe/pledges
-- Cross-publication discovery
+- Cross-publication discovery of **category-level rankings** is now supported via `leaderboard` (see § Category Leaderboard). Still out of scope: arbitrary per-subscriber / per-post data for publications you don't own — the leaderboard endpoint only exposes the same aggregate, banded fields Substack shows publicly on its own category pages.
 - OAuth / programmatic login flows
 - Streaming/WebSocket or podcast-distribution management
