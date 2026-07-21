@@ -5,7 +5,7 @@ import httpx
 import pytest
 import respx
 
-from substack_cli.app import tags_app
+from substack_cli.app import app, tags_app
 from substack_cli.client import SubstackClient
 from substack_cli.manage import (
     attach_tag,
@@ -87,3 +87,44 @@ def test_update_publication_rejects_unrecognized_field(fake_cookies, fake_public
     client = SubstackClient(cookies=fake_cookies, publication_url=fake_publication_url)
     with pytest.raises(ValueError):
         update_publication(client, foo="bar")
+
+
+# ---------------------------------------------------------------------------
+# CLI command surface (via CliRunner) — regression for FEATURE-GAPS #1
+# ---------------------------------------------------------------------------
+
+@respx.mock
+def test_cli_update_sends_welcome_email_content(
+    isolated_config, authed_env, write_enabled_env, fake_publication_url, cli_runner
+):
+    """`publication update --welcome-email-content` must reach the API.
+
+    Regression for FEATURE-GAPS #1: welcome_email_content is in
+    _RECOGNIZED_PUB_FIELDS and the update_publication docstring, but was
+    missing from the CLI command signature, so it could never be sent.
+    """
+    route = respx.put(f"{fake_publication_url}/api/v1/publication").mock(
+        return_value=httpx.Response(200, json={"ok": True})
+    )
+    result = cli_runner.invoke(
+        app,
+        ["publication", "update", "--welcome-email-content", "Thanks for subscribing!"],
+    )
+    assert result.exit_code == 0, result.output
+    assert route.called
+    sent_body = json.loads(route.calls[0].request.content)
+    assert sent_body == {"welcome_email_content": "Thanks for subscribing!"}
+
+
+@respx.mock
+def test_cli_update_still_sends_name(
+    isolated_config, authed_env, write_enabled_env, fake_publication_url, cli_runner
+):
+    """Guard the pre-existing --name path is untouched by the new param."""
+    route = respx.put(f"{fake_publication_url}/api/v1/publication").mock(
+        return_value=httpx.Response(200, json={"ok": True})
+    )
+    result = cli_runner.invoke(app, ["publication", "update", "--name", "New Name"])
+    assert result.exit_code == 0, result.output
+    sent_body = json.loads(route.calls[0].request.content)
+    assert sent_body == {"name": "New Name"}

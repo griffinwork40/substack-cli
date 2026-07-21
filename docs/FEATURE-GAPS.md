@@ -25,12 +25,14 @@ Full draft lifecycle (`drafts create/list/get/update/delete/prepublish/publish/s
 
 ## Tier 1 — Confirmed defects / near-trivial completions (high confidence, small diff)
 
-### 1. `publication update --welcome_email_content` is unreachable *(CONFIRMED BUG)*
-The command signature exposes only `name`, `hero_text`, `language`
+### 1. `publication update --welcome_email_content` is unreachable ✅ *(FIXED 2026-07-21)*
+~~The command signature exposes only `name`, `hero_text`, `language`
 (`manage.py:405-410`), yet `_RECOGNIZED_PUB_FIELDS` (`manage.py:167`), the `update_publication`
 docstring (`manage.py:172`), **and** the reference table (`references/substack-api.md:54`) all
-list `welcome_email_content`. The field can never be sent from the CLI.
-**Fix:** add the `welcome_email_content: str = None` param + passthrough (~5 lines). **Confidence: high.**
+list `welcome_email_content`. The field can never be sent from the CLI.~~
+**Resolved:** added the `--welcome-email-content` param + passthrough to `publication_update_cmd`
+(`manage.py`); CLI-level regression tests added (`tests/test_manage_publication.py`). Also corrected
+a stale `--hero_text` → `--hero-text` example in `SKILL.md` (Typer emits hyphenated options).
 
 ### 2. `publication_settings` boolean toggles are not wrapped at all
 Only `PUT /publication` (name/hero/language/welcome) is implemented. The community-confirmed

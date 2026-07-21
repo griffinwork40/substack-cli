@@ -193,7 +193,9 @@ SUBSTACK_ENABLE_WRITE=true substack tags detach 123 1
 
 ```bash
 SUBSTACK_ENABLE_WRITE=true substack publication update --name "New Name"
-SUBSTACK_ENABLE_WRITE=true substack publication update --hero_text "New tagline"
+SUBSTACK_ENABLE_WRITE=true substack publication update --hero-text "New tagline"
+SUBSTACK_ENABLE_WRITE=true substack publication update --welcome-email-content "Thanks for subscribing!"
+# One field per call. Options are hyphenated: --hero-text, --welcome-email-content.
 ```
 
 ### Config
