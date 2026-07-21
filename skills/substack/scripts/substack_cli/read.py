@@ -304,23 +304,29 @@ def get_post_analytics(client: SubstackClient, post_id: int) -> dict:
 
 # --- Bulk analytics + digest (Milestone 1: the flywheel's Analyze step) -----
 #
-# Defensive-by-design: the post list comes from the *verified* public archive
-# endpoint, and per-post engagement stats from the *verified*
-# post_management/detail endpoint (N+1 calls; the client throttles). A Phase-0
-# spike may later show GET /api/v1/post_management/published carries a per-post
-# `stats` block, collapsing this to ONE call — if so, swap the list source in
-# get_posts_analytics() and drop the per-post loop. The exact upstream stat
-# field names are unverified, so _extract_post_stats/_stat_value tolerate
-# several envelope shapes and spellings. See
-# docs/plans/amplify-content-flywheel.md (Phase 0, Milestone 1).
+# The post list comes from the *verified* public archive endpoint, and per-post
+# engagement stats from the *verified* post_management/detail endpoint (N+1
+# calls; the client throttles). Phase-0 spike (2026-07-21) CONFIRMED that
+# detail/{id}?offset=0&limit=1 returns a rich nested `stats` block (~30 fields:
+# views/opens/open_rate/clicks/signups_within_1_day/engagement_rate/
+# estimated_value + a firstWeekDailyStats timeseries + comps benchmarks). A
+# future optimization: GET /api/v1/post_management/published may carry per-post
+# stats, collapsing the loop to ONE call — swap the list source in
+# get_posts_analytics() if confirmed. See docs/plans/amplify-content-flywheel.md.
 
-# Field-name aliases per sort metric; first present wins, else 0.
+# Field-name aliases per sort metric; first present wins, else 0. VERIFIED
+# against a live detail response 2026-07-21. Note: the meaningful near-term
+# signup signal is `signups_within_1_day` — the top-level `signups` reads 0 on
+# recent posts, so it is only a fallback.
 _STAT_SORT_FIELDS: dict = {
-    "signups": ("signups", "free_signups", "total_signups", "new_free_subscriptions"),
-    "open_rate": ("open_rate", "email_open_rate", "opens_rate"),
+    "signups": ("signups_within_1_day", "signups", "free_signups", "total_signups"),
+    "subscriptions": ("subscriptions_within_1_day", "subscribes", "subscriptions"),
+    "open_rate": ("open_rate", "email_open_rate"),
+    "opens": ("opens", "opened", "email_opens"),
     "views": ("views", "total_views", "web_views"),
-    "opens": ("opens", "email_opens", "unique_opens"),
-    "clicks": ("clicks", "total_clicks", "unique_clicks"),
+    "clicks": ("clicks", "click_through_rate", "total_clicks"),
+    "engagement_rate": ("engagement_rate",),
+    "value": ("estimated_value", "new_subscription_invoice_value"),
 }
 
 
@@ -358,11 +364,11 @@ def get_posts_analytics(
 ) -> list:
     """Rank published posts by an engagement metric.
 
-    `sort` ∈ {signups, open_rate, views, opens, clicks}. Lists posts from the
-    archive, fetches per-post stats, and returns objects
-    {id, title, slug, post_date, stats} sorted descending by `sort` (missing
-    metric → 0, post still listed). Degrades gracefully: a post whose detail
-    call fails is kept with stats={}."""
+    `sort` ∈ {signups, subscriptions, open_rate, opens, views, clicks,
+    engagement_rate, value}. Lists posts from the archive, fetches per-post
+    stats, and returns objects {id, title, slug, post_date, stats} sorted
+    descending by `sort` (missing metric → 0, post still listed). Degrades
+    gracefully: a post whose detail call fails is kept with stats={}."""
     if sort not in _STAT_SORT_FIELDS:
         raise ValueError(f"sort must be one of: {', '.join(_STAT_SORT_FIELDS)}")
     posts = get_archive(client, sort="new", offset=0, limit=limit)
@@ -628,7 +634,7 @@ def analytics_post_cmd(post_id: int, pretty: bool = False):
 def analytics_posts_cmd(
     limit: int = 25, sort: str = "signups", pretty: bool = False
 ):
-    """Rank published posts by an engagement metric (signups|open_rate|views|opens|clicks)."""
+    """Rank published posts by an engagement metric (signups|subscriptions|open_rate|opens|views|clicks|engagement_rate|value)."""
     try:
         client = _make_client()
         result = get_posts_analytics(client, limit=limit, sort=sort)

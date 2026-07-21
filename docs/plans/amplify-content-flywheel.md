@@ -33,8 +33,20 @@ the Analyze half (digest/bulk-stats) needs new CLI commands. Distribute/Atomize 
 
 ## Phase 0 — De-risking spikes (run FIRST, against a real publication)
 
-These gate the plan. None can be done from this repo (no live creds here); each is a `--pretty`
-call an operator runs once, then we lock the shape into a `respx` fixture.
+These gate the plan. Each is a `--pretty` call run once against a live publication, then we lock the
+shape into a `respx` fixture.
+
+> **RESULTS (2026-07-21, run live against a configured publication):**
+> - **Spike 2 — RESOLVED ✅.** `GET /post_management/detail/{id}?offset=0&limit=1` returns a rich
+>   nested `stats` block (~30 fields): `views`, `opens`, `open_rate`, `clicks`,
+>   `signups_within_1_day`, `subscriptions_within_1_day`, `engagement_rate`, `estimated_value`,
+>   `shares`, a `firstWeekDailyStats[]` timeseries, and `comps` benchmarks. **This DISPROVES the old
+>   "metadata only" caveat.** **Bug found + fixed:** near-term signups live in `signups_within_1_day`
+>   (top-level `signups` reads 0 on recent posts) — `_STAT_SORT_FIELDS` corrected; `analytics posts`
+>   verified ranking live (2 → 1 → 0 signups_1d).
+> - **Spike 1 — deferred (non-blocking).** N+1 via `detail/{id}` confirmed working; whether
+>   `post_management/published` carries stats (→ 1 call) is an untested optimization. Not needed to ship.
+> - **Spikes 3–4 — open**, gate Milestone 2/3 (Notes threading/scheduling; X/Threads auth).
 
 1. **Does the bulk list carry per-post stats?** Probe `GET /api/v1/post_management/published`
    (and `?offset=0&limit=1`). **If it returns a `stats` block per post → digest is 1 call.

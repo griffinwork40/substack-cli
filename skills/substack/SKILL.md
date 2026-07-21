@@ -94,9 +94,9 @@ substack feed --raw                                # raw RSS XML
 substack search "AI infrastructure"                # full-text search (filtering behavior unconfirmed by Substack)
 substack subscribers count                         # subscriber count / growth summary
 substack subscribers stats                          # detailed subscriber stats (fixed 25-row sample, not a full enumeration — see caveat below)
-substack analytics post 204779662                  # POST METADATA only — no engagement fields (see caveat below)
+substack analytics post 204779662                  # rich per-post stats: views/opens/open_rate/clicks/signups + firstWeekDailyStats + comps
 substack analytics summary                          # publish dashboard summary
-substack analytics posts --sort signups --limit 25  # rank published posts by a metric (signups|open_rate|views|opens|clicks) — see caveat
+substack analytics posts --sort signups --limit 25  # rank posts by a metric (signups|subscriptions|open_rate|opens|views|clicks|engagement_rate|value)
 substack analytics digest --top 5                   # "what's working": top posts by signups + publication summary (ranked JSON)
 substack comments list 204779662                   # reader comments on a post
 substack whoami                                    # confirm which account the cookie belongs to
@@ -108,18 +108,21 @@ substack leaderboard 76739 --pretty                # numeric category id also ac
 ```
 
 **Caveats worth knowing before you rely on these:**
-- `analytics post` returns post **metadata** (title, dates, audience, word
-  count) — it does **not** include engagement (reactions/restacks). For
-  engagement data, pull it from the `archive` payload instead.
+- `analytics post` returns a rich `stats` block (**verified live 2026-07-21**):
+  `views`, `opens`, `open_rate`, `clicks`, `signups_within_1_day`,
+  `engagement_rate`, `estimated_value`, a `firstWeekDailyStats` timeseries, and
+  `comps` benchmarks — plus post metadata. It does **not** include social
+  reactions/restacks (those are a separate surface).
 - `subscribers stats` always requests `limit:25/offset:0` and returns
   that **fixed 25-row sample** — it has no pagination and is not a full
   subscriber enumeration.
 - `analytics posts` / `analytics digest` list posts from `archive` and pull
-  per-post stats from `post_management/detail` (N+1). **The engagement stat
-  shape is UNVERIFIED** — per the `analytics post` caveat above that endpoint
-  may return metadata only, in which case ranking falls back to `0` and posts
-  are still listed (unranked). Confirm the real `stats` shape with the Phase-0
-  spike before relying on the ranking. See `docs/plans/amplify-content-flywheel.md`.
+  per-post stats from `post_management/detail` (N+1, throttled). **Verified
+  working 2026-07-21.** Ranking note: the meaningful signup signal is
+  `signups_within_1_day` — the top-level `signups` reads 0 on recent posts, so
+  `--sort signups` ranks by the within-1-day field. A post whose detail call
+  fails is still listed (stats `{}`, ranks as 0). See
+  `docs/plans/amplify-content-flywheel.md`.
 
 ### Drafting & publishing
 

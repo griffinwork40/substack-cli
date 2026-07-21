@@ -49,6 +49,19 @@ def test_stat_value_non_dict_is_zero():
     assert _stat_value(None, "signups") == 0.0  # type: ignore[arg-type]
 
 
+def test_stat_value_signups_prefers_within_1_day():
+    # Verified live 2026-07-21: the real near-term signal is signups_within_1_day;
+    # the top-level `signups` reads 0 on recent posts. Precedence must pick the
+    # within_1_day field over the (fallback) `signups`.
+    stats = {"signups": 0, "signups_within_1_day": 2}
+    assert _stat_value(stats, "signups") == 2.0
+
+
+def test_stat_value_supports_engagement_rate_and_value():
+    assert _stat_value({"engagement_rate": 0.66}, "engagement_rate") == 0.66
+    assert _stat_value({"estimated_value": 12}, "value") == 12.0
+
+
 def test_extract_post_stats_nested_envelope():
     assert _extract_post_stats({"stats": {"views": 3}}) == {"views": 3}
 
