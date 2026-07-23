@@ -406,9 +406,11 @@ def publication_update_cmd(
     name: str = None,
     hero_text: str = None,
     language: str = None,
+    welcome_email_content: str = None,
     pretty: bool = False,
 ):
-    """Update a publication setting. Only one field per call."""
+    """Update a publication setting. Only one field per call
+    (name, hero_text, language, welcome_email_content)."""
     if not is_write_enabled():
         emit_error("Write operations require SUBSTACK_ENABLE_WRITE=true", pretty=pretty)
     try:
@@ -420,6 +422,8 @@ def publication_update_cmd(
             fields["hero_text"] = hero_text
         if language is not None:
             fields["language"] = language
+        if welcome_email_content is not None:
+            fields["welcome_email_content"] = welcome_email_content
         result = update_publication(client, **fields)
         output(result, pretty=pretty)
     except (SubstackApiError, AuthError, ValueError) as exc:
