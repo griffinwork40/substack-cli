@@ -5,6 +5,7 @@ the *comment* system, so the endpoints are named `comment`/`reader/feed`
 even though the UI calls them Notes:
 
     CREATE  POST   /api/v1/comment/feed
+    REPLY   POST   /api/v1/comment/feed                   (body adds parent_id)
     LIST    GET    /api/v1/reader/feed                    (personalized home)
             GET    /api/v1/reader/feed/profile/{user_id}  (a user's own notes)
     GET     GET    /api/v1/reader/feed/c-{comment_id}     (single note)
@@ -151,6 +152,43 @@ def create_note(
     return client.post("/api/v1/comment/feed", host="A", json_body=body)
 
 
+def reply_to_note(
+    client: SubstackClient,
+    parent_id: int,
+    *,
+    text: Optional[str] = None,
+    body_json: Optional[str] = None,
+    reply_minimum_role: str = DEFAULT_REPLY_MINIMUM_ROLE,
+) -> dict:
+    """Publish a REPLY to an existing Note, threading it under `parent_id`.
+
+    Uses the same endpoint as `create_note` (POST /api/v1/comment/feed, host
+    "A"); the distinguishing field is `parent_id`. `body_json` (a full
+    ProseMirror doc) takes precedence over `text`. Requires
+    SUBSTACK_ENABLE_WRITE=true (defense-in-depth — the command layer also gates).
+    """
+    if not is_write_enabled():
+        raise ValueError(
+            "Write operations require SUBSTACK_ENABLE_WRITE=true "
+            "(env var) or enable_write: true (config)"
+        )
+    if body_json is not None:
+        doc = _load_body_json(body_json)
+    elif text is not None:
+        doc = _text_to_note_doc(text)
+    else:
+        raise ValueError("Provide reply text or --body-json.")
+
+    body = {
+        "bodyJson": doc,
+        "parent_id": parent_id,
+        "tabId": "for-you",
+        "surface": "feed",
+        "replyMinimumRole": reply_minimum_role,
+    }
+    return client.post("/api/v1/comment/feed", host="A", json_body=body)
+
+
 def _resolve_self_user_id(client: SubstackClient) -> int:
     """Look up the authenticated user's numeric id via /user/profile/self."""
     profile = client.get("/api/v1/user/profile/self", host="A")
@@ -265,6 +303,65 @@ def notes_create_cmd(
         client = _make_client()
         result = create_note(
             client, text=text, body_json=body_json, reply_minimum_role=reply_min_role
+        )
+        output(result, pretty=pretty)
+    except (SubstackApiError, AuthError, ValueError) as exc:
+        emit_error(str(exc), status_code=getattr(exc, "status_code", None), pretty=pretty)
+    except Exception as exc:
+        emit_error(f"Unexpected error: {exc}", pretty=pretty)
+
+
+@notes_app.command("reply")
+def notes_reply_cmd(
+    parent_id: str = typer.Argument(
+        ..., help="Parent note/comment id to reply to (accepts 123 or c-123)."
+    ),
+    text: str = typer.Argument(
+        None,
+        help="Reply text. Blank lines split paragraphs; supports **bold**, "
+        "*italic*, [text](url). Omit when using --body-json.",
+    ),
+    body_json: str = typer.Option(
+        None,
+        "--body-json",
+        help="Path to a JSON file or a raw ProseMirror bodyJson document. "
+        "Overrides TEXT — use for rich content (mentions, images, etc.).",
+    ),
+    reply_min_role: str = typer.Option(
+        DEFAULT_REPLY_MINIMUM_ROLE,
+        "--reply-min-role",
+        help="Who may reply: everyone | subscriber | paid_subscriber | founding.",
+    ),
+    yes: bool = typer.Option(
+        False, "--yes", help="Confirm publishing (notes are immediate + uneditable)."
+    ),
+    pretty: bool = False,
+):
+    """Reply to a Note, threading it under PARENT_ID.
+
+    Replies publish IMMEDIATELY to your public feed and CANNOT be edited (only
+    deleted) — so this command requires --yes, like `notes create`.
+    """
+    if text is None and body_json is None:
+        emit_error("Provide reply text or --body-json.", pretty=pretty)
+    if not yes:
+        emit_error(
+            "Refusing to publish reply without --yes. Notes publish immediately "
+            "to your public feed and cannot be edited (only deleted). "
+            "Re-run with --yes to confirm.",
+            pretty=pretty,
+        )
+    if not is_write_enabled():
+        emit_error(
+            "Write operations require SUBSTACK_ENABLE_WRITE=true "
+            "(env var) or enable_write: true (config)",
+            pretty=pretty,
+        )
+    try:
+        pid = _normalize_comment_id(parent_id)
+        client = _make_client()
+        result = reply_to_note(
+            client, pid, text=text, body_json=body_json, reply_minimum_role=reply_min_role
         )
         output(result, pretty=pretty)
     except (SubstackApiError, AuthError, ValueError) as exc:

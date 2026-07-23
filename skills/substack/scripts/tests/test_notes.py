@@ -20,6 +20,7 @@ from substack_cli.notes import (
     delete_note,
     get_note,
     list_notes,
+    reply_to_note,
 )
 
 
@@ -187,6 +188,74 @@ def test_create_note_no_content_raises(
 
 
 # ---------------------------------------------------------------------------
+# reply_to_note
+# ---------------------------------------------------------------------------
+
+@respx.mock
+def test_reply_to_note_posts_to_comment_feed_with_parent_id(
+    fake_cookies, fake_publication_url, isolated_config, write_enabled_env
+):
+    route = respx.post(f"{SUBSTACK_COM}/api/v1/comment/feed").mock(
+        return_value=httpx.Response(200, json={"id": 555})
+    )
+    client = SubstackClient(cookies=fake_cookies, publication_url=fake_publication_url)
+    result = reply_to_note(client, 100, text="hi")
+    assert route.called
+    assert result == {"id": 555}
+    sent = json.loads(route.calls[0].request.content)
+    assert sent["parent_id"] == 100
+    assert isinstance(sent["bodyJson"], dict)  # NOT a str
+    assert sent["bodyJson"]["type"] == "doc"
+    assert sent["replyMinimumRole"] == "everyone"
+    assert sent["tabId"] == "for-you"
+    assert sent["surface"] == "feed"
+
+
+@respx.mock
+def test_reply_to_note_body_json_takes_precedence_over_text(
+    fake_cookies, fake_publication_url, isolated_config, write_enabled_env
+):
+    route = respx.post(f"{SUBSTACK_COM}/api/v1/comment/feed").mock(
+        return_value=httpx.Response(200, json={"id": 1})
+    )
+    client = SubstackClient(cookies=fake_cookies, publication_url=fake_publication_url)
+    raw = '{"type": "doc", "content": [{"type": "paragraph", "content": []}]}'
+    reply_to_note(client, 100, text="ignored", body_json=raw)
+    sent = json.loads(route.calls[0].request.content)
+    assert sent["bodyJson"] == json.loads(raw)
+
+
+@respx.mock
+def test_reply_to_note_reply_min_role_override(
+    fake_cookies, fake_publication_url, isolated_config, write_enabled_env
+):
+    route = respx.post(f"{SUBSTACK_COM}/api/v1/comment/feed").mock(
+        return_value=httpx.Response(200, json={"id": 1})
+    )
+    client = SubstackClient(cookies=fake_cookies, publication_url=fake_publication_url)
+    reply_to_note(client, 100, text="Paid only", reply_minimum_role="paid_subscriber")
+    sent = json.loads(route.calls[0].request.content)
+    assert sent["replyMinimumRole"] == "paid_subscriber"
+
+
+def test_reply_to_note_requires_write_gate(
+    isolated_config, authed_env, fake_cookies, fake_publication_url
+):
+    """No respx route registered — the write gate must block before any HTTP."""
+    client = SubstackClient(cookies=fake_cookies, publication_url=fake_publication_url)
+    with pytest.raises((SubstackApiError, ValueError)):
+        reply_to_note(client, 100, text="hi")
+
+
+def test_reply_to_note_no_content_raises(
+    isolated_config, fake_cookies, fake_publication_url, write_enabled_env
+):
+    client = SubstackClient(cookies=fake_cookies, publication_url=fake_publication_url)
+    with pytest.raises(ValueError):
+        reply_to_note(client, 100)
+
+
+# ---------------------------------------------------------------------------
 # list_notes
 # ---------------------------------------------------------------------------
 
@@ -320,3 +389,45 @@ def test_cli_create_happy_path(
     result = cli_runner.invoke(notes_app, ["create", "Hello Notes", "--yes"])
     assert result.exit_code == 0
     assert json.loads(result.stdout.strip())["id"] == 999
+
+
+def test_cli_reply_refuses_without_yes(
+    isolated_config, authed_env, write_enabled_env, cli_runner
+):
+    """Even with the write gate enabled, `notes reply` needs --yes."""
+    result = cli_runner.invoke(notes_app, ["reply", "100", "Hello"])
+    assert result.exit_code != 0
+    assert "yes" in result.output.lower()
+
+
+def test_cli_reply_refuses_without_write_gate(isolated_config, authed_env, cli_runner):
+    result = cli_runner.invoke(notes_app, ["reply", "100", "Hello", "--yes"])
+    assert result.exit_code != 0
+    assert "SUBSTACK_ENABLE_WRITE" in result.output
+
+
+@respx.mock
+def test_cli_reply_happy_path(
+    isolated_config, authed_env, write_enabled_env, cli_runner
+):
+    route = respx.post(f"{SUBSTACK_COM}/api/v1/comment/feed").mock(
+        return_value=httpx.Response(200, json={"id": 999})
+    )
+    result = cli_runner.invoke(notes_app, ["reply", "100", "Hi there", "--yes"])
+    assert result.exit_code == 0
+    assert json.loads(result.stdout.strip())["id"] == 999
+    sent = json.loads(route.calls[0].request.content)
+    assert sent["parent_id"] == 100
+
+
+@respx.mock
+def test_cli_reply_accepts_c_prefixed_parent_id(
+    isolated_config, authed_env, write_enabled_env, cli_runner
+):
+    route = respx.post(f"{SUBSTACK_COM}/api/v1/comment/feed").mock(
+        return_value=httpx.Response(200, json={"id": 999})
+    )
+    result = cli_runner.invoke(notes_app, ["reply", "c-100", "Hi", "--yes"])
+    assert result.exit_code == 0
+    sent = json.loads(route.calls[0].request.content)
+    assert sent["parent_id"] == 100  # the `c-` prefix is stripped
