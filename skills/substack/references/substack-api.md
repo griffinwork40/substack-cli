@@ -54,6 +54,7 @@ research (all ~55 discovered endpoints), see
 | `tags detach` | DELETE | `/api/v1/post/{id}/tag/{tag_id}` | P | Yes | Single source | — |
 | `publication update` | PUT | `/api/v1/publication` | P | Yes | Single source | One field per call: `name`, `hero_text`, `language`, `welcome_email_content` |
 | `notes create` | POST | `/api/v1/comment/feed` | A | Yes | Confirmed (2+) | Body `{bodyJson, replyMinimumRole}`. **`bodyJson` is a nested OBJECT** (NOT stringified like `draft_body`). Publishes immediately — **no edit/undo**. Requires `--yes`. |
+| `notes reply` | POST | `/api/v1/comment/feed` | A | Yes | **Confirmed (live)** | Body `{bodyJson, parent_id, tabId:"for-you", surface:"feed", replyMinimumRole}` — **SAME endpoint as `notes create`**; `parent_id` threads the reply under the parent note (visible in the created reply's `ancestor_path`). Publishes immediately — **no edit/undo** (delete only). Requires `--yes`. `POST /api/v1/comment/{id}` 404s — the reply path is `comment/feed`. |
 | `notes list` | GET | `/api/v1/reader/feed` (home) · `/api/v1/reader/feed/profile/{user_id}` (`--mine`/`--user-id`) | A | Yes | Confirmed (2+) | Returns `{items:[...]}`; note entity_keys are `c-`-prefixed (posts are `p-`). `GET /comment/feed` 403s — the read path is `reader/feed`. |
 | `notes get` | GET | `/api/v1/reader/feed/c-{id}` | A | Yes | Reported | Single-note detail (SPA feed-item expand path) |
 | `notes delete` | DELETE | `/api/v1/comment/{id}` | A | Yes | Confirmed (2+) | Same endpoint as `comments delete` (notes are comment-backed). Requires `--yes`. |
@@ -123,7 +124,7 @@ never the live payload.
 
 ## Deferred / Out of Scope for v1
 
-- Substack Notes **editing** — Notes CRUD is implemented (`notes create`/`list`/`get`/`delete`), but there is **no edit/update endpoint**: notes publish immediately with no draft state and no undo. The only "edit" is delete-then-recreate (which yields a new id).
+- Substack Notes **editing** — Notes CRUD + replies are implemented (`notes create`/`reply`/`list`/`get`/`delete`), but there is **no edit/update endpoint**: notes publish immediately with no draft state and no undo. The only "edit" is delete-then-recreate (which yields a new id).
 - Full Markdown→ProseMirror (lists, images-in-body, footnotes, paywall markers, embeds)
 - Messaging/Chat/DMs
 - Stripe/pledges

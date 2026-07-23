@@ -6,16 +6,17 @@ description: >
   content (archive, posts, RSS feed, comments, search, analytics) and
   manage a publication you own (create/edit/publish/schedule drafts,
   moderate comments, manage subscribers, recommendations, and tags), and
-  post/list/delete Substack Notes (Substack's micro-blog surface; note that
-  the API has no note-editing endpoint — notes publish immediately).
+  post/reply-to/list/delete Substack Notes (Substack's micro-blog surface;
+  note that the API has no note-editing endpoint — notes publish immediately).
   Triggers on requests to check a Substack newsletter's archive or posts,
   pull post analytics or subscriber counts, draft or publish a Substack
-  post, schedule a newsletter, reply to or moderate Substack comments, post
-  or delete a Substack Note, or manage a Substack publication
+  post, schedule a newsletter, reply to or moderate Substack comments, post,
+  reply to, or delete a Substack Note, or manage a Substack publication
   programmatically. Examples: "what did I publish on Substack this month",
   "draft a new Substack post", "how many subscribers does my newsletter
   have", "schedule my Substack post for Friday", "reply to comments on my
-  latest post", "post a Substack Note", "delete my last note". Requires
+  latest post", "post a Substack Note", "reply to that Substack note",
+  "delete my last note". Requires
   SUBSTACK_COOKIES_STRING (session cookie) for any authenticated
   operation; read-only public endpoints (archive, post, feed) work without
   auth. Write operations additionally require SUBSTACK_ENABLE_WRITE=true.
@@ -68,12 +69,12 @@ export SUBSTACK_ENABLE_WRITE=true
 # or: substack config set-value enable_write true
 ```
 
-Eight specific commands additionally require `--yes` even with the gate
+Nine specific commands additionally require `--yes` even with the gate
 enabled, because they are hard to reverse or immediately externally
 visible: `drafts delete`, `drafts publish`, `comments delete`,
 `subscribers remove`, `recommendations remove`, `tags delete`,
-`notes create` (notes publish immediately and cannot be edited), and
-`notes delete`.
+`notes create` and `notes reply` (both publish immediately and cannot be
+edited), and `notes delete`.
 
 ### Verify your setup
 
@@ -162,6 +163,8 @@ substack notes get c-98765                           # single note (accepts 9876
 SUBSTACK_ENABLE_WRITE=true substack notes create "Shipping Notes support today. **Big.**" --yes
 SUBSTACK_ENABLE_WRITE=true substack notes create --body-json ./note.json --yes    # rich ProseMirror body
 SUBSTACK_ENABLE_WRITE=true substack notes create "Subscribers only" --reply-min-role paid_subscriber --yes
+# reply: threads a reply under a parent note (accepts 98765 or c-98765); also immediate + uneditable -> requires --yes
+SUBSTACK_ENABLE_WRITE=true substack notes reply 98765 "Great point — totally agree." --yes
 SUBSTACK_ENABLE_WRITE=true substack notes delete 98765 --yes
 ```
 
@@ -238,8 +241,8 @@ Highlights: search filtering behavior is unconfirmed by Substack itself;
 can 403 a plain HTTP client even with valid cookies (a documented
 browser-vs-curl gap, not necessarily an expired cookie). **Notes cannot be
 edited** — Substack exposes no note-update endpoint, so `notes` supports
-create/list/get/delete only; to change a note, delete it and create a new
-one (a new id is issued). **`leaderboard` covers category-level
+create/reply/list/get/delete only; to change a note, delete it and create a
+new one (a new id is issued). **`leaderboard` covers category-level
 cross-publication discovery only** (top 25 per category/rank) — it cannot
 answer per-subscriber questions about a publication you don't own; only
 `finance` and `us-politics` have live-verified slug aliases, everything
