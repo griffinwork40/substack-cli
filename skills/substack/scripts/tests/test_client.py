@@ -148,6 +148,82 @@ def test_429_exhausting_retries_raises_substack_api_error_with_429(
 
 
 # ---------------------------------------------------------------------------
+# Retry safety — non-idempotent methods must not be retried on transport
+# errors (regression coverage for the blind-retry duplicate-write bug)
+# ---------------------------------------------------------------------------
+
+@respx.mock
+def test_post_transport_error_raises_without_retry(
+    fake_cookies, fake_publication_url, no_sleep
+):
+    """POST + httpx.HTTPError must NOT be retried: the write may have
+    already committed server-side, so re-sending risks a duplicate.
+    Exactly one HTTP attempt should ever be made."""
+    route = respx.post(f"{fake_publication_url}/api/v1/drafts").mock(
+        side_effect=httpx.ConnectError("connection reset")
+    )
+    client = SubstackClient(cookies=fake_cookies, publication_url=fake_publication_url)
+    with pytest.raises(SubstackApiError):
+        client.post("/api/v1/drafts", json_body={"title": "Test"})
+    assert route.call_count == 1
+
+
+@respx.mock
+def test_get_transport_error_on_first_attempt_is_retried_and_succeeds(
+    fake_cookies, fake_publication_url, no_sleep
+):
+    """GET is idempotent — a transport error on the first attempt should be
+    retried and can still succeed."""
+    route = respx.get(f"{fake_publication_url}/api/v1/archive").mock(
+        side_effect=[
+            httpx.ConnectError("connection reset"),
+            httpx.Response(200, json={"ok": True}),
+        ]
+    )
+    client = SubstackClient(cookies=fake_cookies, publication_url=fake_publication_url)
+    result = client.get("/api/v1/archive")
+    assert route.call_count == 2
+    assert result == {"ok": True}
+
+
+@respx.mock
+def test_put_transport_error_is_retried(
+    fake_cookies, fake_publication_url, no_sleep
+):
+    """PUT is idempotent — it must still get the transport-error retry
+    safety net."""
+    route = respx.put(f"{fake_publication_url}/api/v1/drafts/123").mock(
+        side_effect=[
+            httpx.ConnectError("connection reset"),
+            httpx.Response(200, json={"id": 123}),
+        ]
+    )
+    client = SubstackClient(cookies=fake_cookies, publication_url=fake_publication_url)
+    result = client.put("/api/v1/drafts/123", json_body={"title": "Updated"})
+    assert route.call_count == 2
+    assert result == {"id": 123}
+
+
+@respx.mock
+def test_post_429_then_200_is_retried_and_succeeds(
+    fake_cookies, fake_publication_url, no_sleep
+):
+    """429 retry must be preserved for ALL methods, including POST — a 429
+    means the server explicitly rejected and never processed the request,
+    so retrying is safe even though POST is otherwise non-idempotent."""
+    route = respx.post(f"{fake_publication_url}/api/v1/drafts").mock(
+        side_effect=[
+            httpx.Response(429, headers={"Retry-After": "0"}),
+            httpx.Response(200, json={"id": 1}),
+        ]
+    )
+    client = SubstackClient(cookies=fake_cookies, publication_url=fake_publication_url)
+    result = client.post("/api/v1/drafts", json_body={"title": "Test"})
+    assert route.call_count == 2
+    assert result == {"id": 1}
+
+
+# ---------------------------------------------------------------------------
 # Error handling
 # ---------------------------------------------------------------------------
 

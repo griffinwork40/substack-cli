@@ -1,5 +1,7 @@
 """Tests for substack_cli.config — local config file storage."""
 import json
+import os
+import stat
 
 from substack_cli import config as config_module
 from substack_cli.app import config_app
@@ -29,6 +31,17 @@ def test_save_config_creates_parent_directories(isolated_config, monkeypatch):
 
     assert nested_path.parent.exists()
     assert nested_path.exists()
+
+
+def test_save_config_sets_file_mode_0600(isolated_config):
+    """The config file holds the session cookie — it must be written with
+    owner-only permissions, not whatever the ambient umask grants."""
+    cfg_path = isolated_config
+
+    config_module.save_config({"cookies_string": "secret"})
+
+    mode = stat.S_IMODE(os.stat(cfg_path).st_mode)
+    assert mode == 0o600
 
 
 def test_save_config_merges_not_overwrites(isolated_config):

@@ -21,6 +21,12 @@ DEFAULT_TIMEOUT = 30.0
 DEFAULT_MIN_INTERVAL = 1.0
 DEFAULT_MAX_RETRIES = 3
 
+# Methods safe to retry after a transport error (timeout/connection reset) —
+# i.e. where re-sending cannot cause a duplicate server-side effect. POST is
+# deliberately excluded: a transport error during POST means the outcome is
+# unknown (the write may have already committed), so retrying could double it.
+_IDEMPOTENT_METHODS = frozenset({"GET", "HEAD", "OPTIONS", "PUT", "DELETE"})
+
 _console = Console(stderr=True)
 
 # ---------------------------------------------------------------------------
@@ -177,7 +183,10 @@ class SubstackClient:
                     raise ValueError(f"Unsupported method: {method}")
             except httpx.HTTPError as exc:
                 msg = self._redact_message(str(exc))
-                if attempts < max_attempts:
+                # Never retry a transport error for non-idempotent methods
+                # (POST) — the request may have already been committed by
+                # the server, so re-sending risks a duplicate write.
+                if method in _IDEMPOTENT_METHODS and attempts < max_attempts:
                     time.sleep(2 ** (attempts - 1))
                     continue
                 raise SubstackApiError(msg, status_code=None) from exc
