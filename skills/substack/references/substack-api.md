@@ -58,6 +58,10 @@ research (all ~55 discovered endpoints), see
 | `notes list` | GET | `/api/v1/reader/feed` (home) · `/api/v1/reader/feed/profile/{user_id}` (`--mine`/`--user-id`) | A | Yes | Confirmed (2+) | Returns `{items:[...]}`; note entity_keys are `c-`-prefixed (posts are `p-`). `GET /comment/feed` 403s — the read path is `reader/feed`. |
 | `notes get` | GET | `/api/v1/reader/feed/c-{id}` | A | Yes | Reported | Single-note detail (SPA feed-item expand path) |
 | `notes delete` | DELETE | `/api/v1/comment/{id}` | A | Yes | Confirmed (2+) | Same endpoint as `comments delete` (notes are comment-backed). Requires `--yes`. |
+| `chat list` | GET | `/api/v1/community/publications/{publication_id}/posts` | P | Yes | **Community-reported, never live-verified** | `--publication-id` is REQUIRED — no resolver exists anywhere in this CLI (`/user/profile/self` returns a user id, not a publication id). |
+| `chat replies` | GET | `/api/v1/community/posts/{thread_id}/comments` | A | Yes | **Community-reported, never live-verified** | Always sends `order=asc&initial=true`. Optional `--before-id`/`--after-id`/`--limit` are None-filtered locally before the request (client.py's own None-stripping only catches a wholly-empty params dict). Response cursor fields are reported as `moreBefore`/`moreAfter` — NOT `hasMore`/`nextCursor`, so `extract_pagination_meta` is intentionally not used; cursors pass through untouched. |
+| `chat sub-replies` | GET | `/api/v1/community/comments/{comment_id}/comments` | A | Yes | **Community-reported, never live-verified** | Sibling of `chat replies` one level deeper (replies to a reply). Same params/pagination behavior. |
+| `chat unread` | GET | `/api/v1/messages/unread-count` | A | Yes | **Community-reported, never live-verified** | Known field: `pubChatUnreadCount`. `--pretty` surfaces it as a bespoke highlighted line (not via the shared `output()` helper, to avoid widening that helper's blast radius across all other commands) before the full render. |
 
 ## Rate Limits
 
@@ -68,7 +72,7 @@ is safe. The CLI throttles to 1.0s between requests by default and retries
 ## Two-Host Routing
 
 - **Host "P"** (publication subdomain): default for most endpoints — `https://{subdomain}.substack.com`
-- **Host "A"** (substack.com bare): used for `whoami`, `categories`, `leaderboard`, and optionally `comments delete`
+- **Host "A"** (substack.com bare): used for `whoami`, `categories`, `leaderboard`, `chat replies`/`chat sub-replies`/`chat unread`, and optionally `comments delete`. `chat list` is host "P" (the publication subdomain).
 
 The CLI handles this automatically per command — you don't need to specify
 the host manually unless using `comments delete --host A`.
@@ -122,11 +126,26 @@ its comma-formatted string form, e.g. `"774,000"` → `774000`),
 so tests and any manual inspection must use a small hand-built fixture,
 never the live payload.
 
+## Chat — confidence caveat
+
+Unlike every other surface in this table, the four `chat` endpoints were
+never independently curl/browser-verified by this project — they are
+carried over from community reverse-engineering of the Substack web app's
+JS bundle with no confirmed live response captured. Treat every field name
+in a `chat` response as provisional. A 404 from any `chat` command most
+likely means the endpoint path or shape has drifted, or the id/
+`--publication-id` you passed is wrong — not necessarily user error. `chat`
+is deliberately **read-only**: Chat has a real write surface (send a
+thread, reply, delete, react, lock, ban, etc.) but every one of those
+endpoints is unverified, and a wrong guess would mutate state visible to
+real, paying subscribers with no undo. None of that is implemented.
+
 ## Deferred / Out of Scope for v1
 
 - Substack Notes **editing** — Notes CRUD + replies are implemented (`notes create`/`reply`/`list`/`get`/`delete`), but there is **no edit/update endpoint**: notes publish immediately with no draft state and no undo. The only "edit" is delete-then-recreate (which yields a new id).
 - Full Markdown→ProseMirror (lists, images-in-body, footnotes, paywall markers, embeds)
-- Messaging/Chat/DMs
+- **Chat writes** (send/reply/delete/react/lock/ban/settings) — reads only (`chat list`/`replies`/`sub-replies`/`unread`) are implemented; see the confidence caveat above.
+- **DMs** — no endpoints implemented at all (read or write).
 - Stripe/pledges
 - Cross-publication discovery of **category-level rankings** is now supported via `leaderboard` (see § Category Leaderboard). Still out of scope: arbitrary per-subscriber / per-post data for publications you don't own — the leaderboard endpoint only exposes the same aggregate, banded fields Substack shows publicly on its own category pages.
 - OAuth / programmatic login flows

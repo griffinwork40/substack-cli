@@ -15,6 +15,11 @@ recommendations_app = typer.Typer(help="Cross-publication recommendations.", no_
 tags_app = typer.Typer(help="Post tag CRUD.", no_args_is_help=True)
 publication_app = typer.Typer(help="Publication settings.", no_args_is_help=True)
 notes_app = typer.Typer(help="Substack Notes (create/list/get/delete).", no_args_is_help=True)
+chat_app = typer.Typer(
+    help="Substack Chat — READ-ONLY (list threads/replies, unread counts). "
+    "Community-reported endpoints, never live-verified; no write commands.",
+    no_args_is_help=True,
+)
 
 app.add_typer(config_app, name="config")
 app.add_typer(drafts_app, name="drafts")
@@ -24,6 +29,7 @@ app.add_typer(recommendations_app, name="recommendations")
 app.add_typer(tags_app, name="tags")
 app.add_typer(publication_app, name="publication")
 app.add_typer(notes_app, name="notes")
+app.add_typer(chat_app, name="chat")
 
 
 # --- config test command (lives here, not in config.py, because it needs
