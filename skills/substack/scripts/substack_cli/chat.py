@@ -49,13 +49,9 @@ from rich.console import Console
 from substack_cli.app import chat_app
 from substack_cli.auth import AuthError, resolve_cookies, resolve_publication_url
 from substack_cli.client import (
-    SUBSTACK_COM,
-    SubstackApiError,
-    SubstackClient,
-    emit_error,
-    output,
-    output_list,
+    SUBSTACK_COM, SubstackApiError, SubstackClient, emit_error, output, output_list,
 )
+from substack_cli.models import extract_list
 
 _console = Console(stderr=True)
 
@@ -245,7 +241,7 @@ def chat_list_cmd(
             return
         client = SubstackClient(cookies=cookies, publication_url=pub_url)
         result = list_threads(client, publication_id)
-        output_list(result, pretty=pretty, title="Chat Threads")
+        output(extract_list(result, "threads"), pretty=pretty)
     except (SubstackApiError, AuthError, ValueError) as exc:
         _emit_chat_error(exc, pretty)
     except Exception as exc:

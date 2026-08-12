@@ -71,11 +71,28 @@ def test_cli_list_requires_publication_id_option(isolated_config, authed_env, cl
 
 @respx.mock
 def test_cli_list_happy_path(isolated_config, authed_env, fake_publication_url, cli_runner):
+    """Live API returns threads in a 'threads' key — must be unwrapped correctly."""
     respx.get(f"{fake_publication_url}/api/v1/community/publications/777/posts").mock(
-        return_value=httpx.Response(200, json={"posts": [{"id": 42}]})
+        return_value=httpx.Response(
+            200,
+            json={"threads": [{"id": 42}], "more": False, "moreAfter": None},
+        )
     )
     result = cli_runner.invoke(chat_app, ["list", "--publication-id", "777"])
     assert result.exit_code == 0 and json.loads(result.stdout.strip()) == [{"id": 42}]
+
+
+@respx.mock
+def test_cli_list_threads_key_not_posts_key(
+    isolated_config, authed_env, fake_publication_url, cli_runner
+):
+    """Regression: 'posts' key (generic) must NOT satisfy the threads extractor."""
+    respx.get(f"{fake_publication_url}/api/v1/community/publications/777/posts").mock(
+        return_value=httpx.Response(200, json={"posts": [{"id": 1}]})
+    )
+    result = cli_runner.invoke(chat_app, ["list", "--publication-id", "777"])
+    # 'posts' key is not 'threads' — extractor raises ValueError → CLI error
+    assert result.exit_code != 0
 
 
 @respx.mock
