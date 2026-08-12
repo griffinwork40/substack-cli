@@ -7,16 +7,21 @@ description: >
   manage a publication you own (create/edit/publish/schedule drafts,
   moderate comments, manage subscribers, recommendations, and tags), and
   post/reply-to/list/delete Substack Notes (Substack's micro-blog surface;
-  note that the API has no note-editing endpoint — notes publish immediately).
+  note that the API has no note-editing endpoint — notes publish immediately),
+  and read (READ-ONLY) Substack Chat — list threads, list replies/sub-replies,
+  and check unread counts; Chat endpoints are community-reported and never
+  live-verified, and there is no write support (no send/reply/delete).
   Triggers on requests to check a Substack newsletter's archive or posts,
   pull post analytics or subscriber counts, draft or publish a Substack
   post, schedule a newsletter, reply to or moderate Substack comments, post,
-  reply to, or delete a Substack Note, or manage a Substack publication
-  programmatically. Examples: "what did I publish on Substack this month",
+  reply to, or delete a Substack Note, check Substack Chat threads/replies/
+  unread counts, or manage a Substack publication programmatically.
+  Examples: "what did I publish on Substack this month",
   "draft a new Substack post", "how many subscribers does my newsletter
   have", "schedule my Substack post for Friday", "reply to comments on my
   latest post", "post a Substack Note", "reply to that Substack note",
-  "delete my last note". Requires
+  "delete my last note", "list my Substack Chat threads", "how many unread
+  Substack chats do I have". Requires
   SUBSTACK_COOKIES_STRING (session cookie) for any authenticated
   operation; read-only public endpoints (archive, post, feed) work without
   auth. Write operations additionally require SUBSTACK_ENABLE_WRITE=true.
@@ -168,6 +173,30 @@ SUBSTACK_ENABLE_WRITE=true substack notes reply 98765 "Great point — totally a
 SUBSTACK_ENABLE_WRITE=true substack notes delete 98765 --yes
 ```
 
+### Chat (read-only)
+
+Substack Chat is the publication-scoped, thread-based messaging surface —
+distinct from Notes (public micro-blog) and DMs (private 1:1/group, not
+implemented at all). **This CLI implements exactly four GET commands and
+nothing else** — no send/reply/delete/react/settings. All four endpoints
+are community-reported and have **never been verified against the live
+API**; treat every response shape as provisional and expect a 404 to mean
+endpoint drift or a wrong id, not necessarily a mistake on your part.
+
+```bash
+substack chat list --publication-id 12345         # list Chat threads (REQUIRED --publication-id — no resolver exists, see caveat below)
+substack chat replies 98765                        # replies in a thread, oldest-first
+substack chat replies 98765 --before-id 500 --limit 20  # cursor pagination (pass-through)
+substack chat sub-replies 55555                    # replies to a reply (second-level thread)
+substack chat unread --pretty                       # unread counts; --pretty highlights pubChatUnreadCount
+```
+
+**`--publication-id` has no resolver.** No command in this CLI (including
+`whoami`) can currently derive a numeric publication id — `/api/v1/user/
+profile/self` returns your *user* id, a different number. Find your
+publication id via your browser's DevTools Network tab while viewing your
+publication's Chat tab, and pass it explicitly.
+
 ### Subscribers
 
 ```bash
@@ -248,4 +277,9 @@ new one (a new id is issued). **`leaderboard` covers category-level
 cross-publication discovery only** (top 25 per category/rank) — it cannot
 answer per-subscriber questions about a publication you don't own; only
 `finance` and `us-politics` have live-verified slug aliases, everything
-else needs a numeric id from `substack categories`.
+else needs a numeric id from `substack categories`. **`chat` is read-only
+and unverified** — all four Chat endpoints are community-reported, never
+confirmed against the live API, and there is no `publication_id` resolver
+(`chat list` requires you to supply `--publication-id` yourself). No write
+support exists for Chat (send/reply/delete/react/settings) or for DMs at
+all (no endpoints implemented).
