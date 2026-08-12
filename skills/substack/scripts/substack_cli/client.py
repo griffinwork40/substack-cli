@@ -25,7 +25,7 @@ DEFAULT_MAX_RETRIES = 3
 # i.e. where re-sending cannot cause a duplicate server-side effect. POST is
 # deliberately excluded: a transport error during POST means the outcome is
 # unknown (the write may have already committed), so retrying could double it.
-_IDEMPOTENT_METHODS = frozenset({"GET", "HEAD", "OPTIONS", "PUT", "DELETE"})
+_IDEMPOTENT_METHODS = frozenset({"GET", "HEAD", "OPTIONS", "DELETE"})
 
 _console = Console(stderr=True)
 
@@ -184,11 +184,13 @@ class SubstackClient:
             except httpx.HTTPError as exc:
                 msg = self._redact_message(str(exc))
                 # Never retry a transport error for non-idempotent methods
-                # (POST) — the request may have already been committed by
+                # (POST, PUT) — the request may have already been committed by
                 # the server, so re-sending risks a duplicate write.
                 if method in _IDEMPOTENT_METHODS and attempts < max_attempts:
                     time.sleep(2 ** (attempts - 1))
                     continue
+                if method not in _IDEMPOTENT_METHODS:
+                    msg = f"{msg} (server may have committed this write)"
                 raise SubstackApiError(msg, status_code=None) from exc
 
             self._last_request_time = time.time()

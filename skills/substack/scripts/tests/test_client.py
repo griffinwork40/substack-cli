@@ -187,21 +187,37 @@ def test_get_transport_error_on_first_attempt_is_retried_and_succeeds(
 
 
 @respx.mock
-def test_put_transport_error_is_retried(
+def test_put_transport_error_raises_without_retry(
     fake_cookies, fake_publication_url, no_sleep
 ):
-    """PUT is idempotent — it must still get the transport-error retry
-    safety net."""
+    """PUT was removed from _IDEMPOTENT_METHODS because publish_draft uses
+    PUT and a transport error mid-flight means the publish may have already
+    committed server-side. Exactly one HTTP attempt should ever be made."""
     route = respx.put(f"{fake_publication_url}/api/v1/drafts/123").mock(
+        side_effect=httpx.ConnectError("connection reset")
+    )
+    client = SubstackClient(cookies=fake_cookies, publication_url=fake_publication_url)
+    with pytest.raises(SubstackApiError):
+        client.put("/api/v1/drafts/123", json_body={"title": "Updated"})
+    assert route.call_count == 1
+
+
+@respx.mock
+def test_delete_transport_error_is_retried(
+    fake_cookies, fake_publication_url, no_sleep
+):
+    """DELETE is idempotent — a transport error should be retried and can
+    still succeed."""
+    route = respx.delete(f"{fake_publication_url}/api/v1/drafts/123").mock(
         side_effect=[
             httpx.ConnectError("connection reset"),
-            httpx.Response(200, json={"id": 123}),
+            httpx.Response(200, json={"ok": True}),
         ]
     )
     client = SubstackClient(cookies=fake_cookies, publication_url=fake_publication_url)
-    result = client.put("/api/v1/drafts/123", json_body={"title": "Updated"})
+    result = client.delete("/api/v1/drafts/123")
     assert route.call_count == 2
-    assert result == {"id": 123}
+    assert result == {"ok": True}
 
 
 @respx.mock

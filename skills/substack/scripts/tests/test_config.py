@@ -2,6 +2,7 @@
 import json
 import os
 import stat
+import warnings
 
 from substack_cli import config as config_module
 from substack_cli.app import config_app
@@ -42,6 +43,35 @@ def test_save_config_sets_file_mode_0600(isolated_config):
 
     mode = stat.S_IMODE(os.stat(cfg_path).st_mode)
     assert mode == 0o600
+    dir_mode = stat.S_IMODE(os.stat(cfg_path.parent).st_mode)
+    assert dir_mode == 0o700
+
+
+def test_save_config_chmod_oserror_is_swallowed_and_warns(isolated_config, monkeypatch):
+    """If os.chmod raises OSError (e.g. FAT/network filesystems that don't
+    support POSIX permissions), save_config must still succeed and emit a
+    warning rather than propagating the exception."""
+    cfg_path = isolated_config
+
+    original_chmod = os.chmod
+
+    def failing_chmod(path, mode):
+        raise OSError("operation not supported")
+
+    monkeypatch.setattr(os, "chmod", failing_chmod)
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        config_module.save_config({"x": 42})
+
+    # The save must have succeeded — data should be loadable.
+    # Temporarily restore chmod so load_config can read the file.
+    monkeypatch.setattr(os, "chmod", original_chmod)
+    data = config_module.load_config()
+    assert data.get("x") == 42
+
+    # At least one warning should have been issued about the permission failure.
+    assert any("restrictive permissions" in str(w.message) for w in caught)
 
 
 def test_save_config_merges_not_overwrites(isolated_config):
