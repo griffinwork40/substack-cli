@@ -46,6 +46,53 @@ no *distinct* growth/ARR command behind them (see Tier 2 #6).
 
 ---
 
+## Tier 0 — Present defects in shipped code
+
+_Added 2026-08-10. Found incidentally during Chat/DM scoping (`docs/CHAT-DM-CAPABILITY-MAP.md`) and
+independently re-derived by an adversarial verification wave. Lettered, not numbered, to avoid
+colliding with the Tier 2+ sequence. These affect **already-shipped commands** and are unrelated to
+any new feature — they rank above Tier 1._
+
+### A. Blind retry re-sends POST/PUT bodies with no idempotency key — duplicate-execution risk ✅ *(FIXED 2026-08-10)*
+~~`_request` wraps every verb in one retry loop shared by `get/post/put/delete` (`client.py:214-242`),
+with **no method-specific guard skipping retry for non-idempotent verbs**. Two branches re-send the
+identical `json_body`:~~
+- ~~`except httpx.HTTPError` → `continue` (`client.py:178-183`) — catches timeouts and connection
+  resets, i.e. **exactly the "did my write land?" case** where the server may have already committed.~~
+- ~~HTTP 429 → `continue` (`client.py:188-198`).~~
+
+~~`DEFAULT_MAX_RETRIES = 3` (`client.py:22`) and no call site overrides it, so 3 extra attempts always
+ship. Every write command inherits this: `notes.create_note`/`reply_to_note` (`notes.py:152,189`),
+`publish.create_draft`/`publish_draft`/`schedule_draft` (`publish.py:204,244-248` — which *also*
+layers a POST-fallback-on-404 atop the retry), `manage.create_comment`/`add_subscriber`/`create_tag`/
+`attach_tag`. Grep for `idempot|uuid|client_id` across the package returns **zero hits**, and
+`test_client.py` has **no case** exercising a mid-POST `httpx.HTTPError` retry.~~
+
+~~Practical worst case today: a transport blip during `drafts publish` or `notes create` silently
+publishes twice.~~
+**Resolved:** added a module-level `_IDEMPOTENT_METHODS` frozenset (`client.py`) and guarded the
+`except httpx.HTTPError` retry branch so a transport error is retried only for GET/HEAD/OPTIONS/
+PUT/DELETE — POST now re-raises immediately on the first transport error instead of re-sending the
+body. The HTTP-429 branch is untouched and still retries for every method (a 429 means the server
+never processed the request, so re-sending is safe). Regression tests added (`tests/test_client.py`):
+POST + transport error asserts exactly one HTTP attempt (`route.call_count == 1`); GET and PUT +
+transport error still retry and succeed; POST + 429-then-200 still retries and succeeds.
+
+### B. Session cookie persisted at default umask, no permission hardening ✅ *(FIXED 2026-08-10)*
+~~`config.py:22-29` writes `~/.config/substack-cli/config.json` with a plain `open(..., "w")` +
+`json.dump`. Grep for `chmod|0o600|0o644|permission` across `substack_cli/` returns **zero hits**, so
+the full account-control credential — the cookie that authorizes all 47 commands, including
+`subscribers remove` and `drafts publish` — sits at whatever the ambient umask grants.
+`auth-setup.md:65` already tells users to treat the string like a password; the code does not.~~
+**Resolved:** `save_config` (`config.py`) now `os.chmod`s the config file to `0o600` and the parent
+directory to `0o700` immediately after writing. The chmod calls are wrapped in `try/except OSError`
+so a platform or filesystem that can't honor them (Windows, some exotic mounts) doesn't break config
+saving — it just silently skips hardening. File format, function signature, and return contract are
+unchanged. Regression test added (`tests/test_config.py`): asserts
+`stat.S_IMODE(os.stat(path).st_mode) == 0o600` after `save_config`.
+
+---
+
 ## Tier 2 — Community-confirmed endpoints, real value, buildable
 
 ### 4. Subscriber CSV export + full-list enumeration

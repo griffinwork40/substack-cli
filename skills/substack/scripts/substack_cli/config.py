@@ -1,5 +1,9 @@
 """Substack CLI — local config file storage (~/.config/substack-cli/config.json)."""
 import json
+import os
+import stat
+import tempfile
+import warnings
 from pathlib import Path
 
 from substack_cli.app import config_app
@@ -21,12 +25,37 @@ def load_config() -> dict:
 
 def save_config(data: dict) -> None:
     """Merges `data` into existing config (does not blindly overwrite
-    unrelated keys). Creates parent dirs as needed."""
+    unrelated keys). Creates parent dirs as needed.
+
+    The file holds the Substack session cookie, so after writing it we
+    harden permissions to owner-only (0o600 on the file, 0o700 on the
+    parent dir). Platforms/filesystems that can't honor chmod (e.g.
+    Windows) must not break config saving — failures there are swallowed.
+    """
     existing = load_config()
     existing.update(data)
     CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with open(CONFIG_PATH, "w", encoding="utf-8") as f:
-        json.dump(existing, f, indent=2)
+    # Harden the parent dir BEFORE writing so the file is never in a
+    # world-accessible directory even briefly.
+    try:
+        os.chmod(CONFIG_PATH.parent, stat.S_IRWXU)
+    except OSError as e:
+        warnings.warn(f"Could not set restrictive permissions on {CONFIG_PATH}: {e}")
+    # Atomic write: create a temp file (restricted fd, never world-readable),
+    # write, then os.replace — eliminates the TOCTOU window of open+chmod.
+    fd, tmp = tempfile.mkstemp(dir=str(CONFIG_PATH.parent), prefix=".cfg-")
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(existing, f, indent=2)
+        os.replace(tmp, str(CONFIG_PATH))
+    except Exception:
+        os.unlink(tmp)
+        raise
+    # Restrict the file itself after replace.
+    try:
+        os.chmod(CONFIG_PATH, stat.S_IRUSR | stat.S_IWUSR)
+    except OSError as e:
+        warnings.warn(f"Could not set restrictive permissions on {CONFIG_PATH}: {e}")
 
 
 def set_value(key: str, value) -> None:
