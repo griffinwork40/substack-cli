@@ -65,6 +65,22 @@ _ENDPOINT_DRIFT_HINT = (
     "has drifted or the id you passed is wrong, not necessarily user error."
 )
 
+_UNSAFE_ID_CHARS = set("/\\?#")
+
+
+def _validate_id(value: str, name: str) -> str:
+    """Raise ValueError if `value` contains path-traversal characters ('/',
+    '\\', '?', '#', or '..') before it is interpolated into a URL path."""
+    if ".." in value:
+        raise ValueError(f"Invalid {name} {value!r}: contains '..' (path traversal).")
+    bad = _UNSAFE_ID_CHARS.intersection(value)
+    if bad:
+        chars = ", ".join(sorted(repr(c) for c in bad))
+        raise ValueError(
+            f"Invalid {name} {value!r}: disallowed character(s) {chars}."
+        )
+    return value
+
 
 def _clean_params(**kwargs: Any) -> dict:
     """Drop keys whose value is None.
@@ -84,13 +100,16 @@ def _clean_params(**kwargs: Any) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def list_threads(client: SubstackClient, publication_id: str) -> Any:
+def list_threads(client: SubstackClient, publication_id: int) -> Any:
     """List Chat threads for a publication.
 
     GET /api/v1/community/publications/{publication_id}/posts on host "P"
     (the publication subdomain). Reported, never live-verified.
+    `publication_id` is int to eliminate path-traversal at parse time.
     """
-    return client.get(f"/api/v1/community/publications/{publication_id}/posts")
+    return client.get(
+        f"/api/v1/community/publications/{publication_id}/posts", host="P"
+    )
 
 
 def list_replies(
@@ -108,6 +127,7 @@ def list_replies(
     after_id/limit are included only when explicitly set (None-filtered
     locally via `_clean_params`). Reported, never live-verified.
     """
+    _validate_id(thread_id, "thread_id")
     params = _clean_params(before_id=before_id, after_id=after_id, limit=limit)
     return client.get(
         f"/api/v1/community/posts/{thread_id}/comments",
@@ -132,6 +152,7 @@ def list_sub_replies(
     order=asc/initial=true + None-filtered cursor pass-through as
     `list_replies`. Reported, never live-verified.
     """
+    _validate_id(comment_id, "comment_id")
     params = _clean_params(before_id=before_id, after_id=after_id, limit=limit)
     return client.get(
         f"/api/v1/community/comments/{comment_id}/comments",
@@ -160,12 +181,13 @@ def get_unread_count(client: SubstackClient) -> Any:
 def _make_client() -> SubstackClient:
     """Resolve auth and create a client for Chat operations.
 
-    `chat replies`/`chat sub-replies`/`chat unread` are host "A"
-    (substack.com) only, so — mirroring notes.py — fall back to
-    substack.com when no publication URL is configured. `chat list` needs
-    host "P" (the publication subdomain) to hit the right host; without a
-    configured publication URL it will still attempt substack.com and most
-    likely 404 (surfaced with the endpoint-drift hint below).
+    Used by `chat replies`/`chat sub-replies`/`chat unread` — all host "A"
+    (substack.com) only — so, mirroring notes.py, falls back to
+    substack.com when no publication URL is configured.
+
+    NOT used by `chat list`: that command resolves pub_url directly and
+    errors early when none is configured, because host "P" against
+    substack.com would silently 404.
     """
     cookies = resolve_cookies()
     try:
@@ -187,7 +209,7 @@ def _emit_chat_error(exc: Exception, pretty: bool) -> None:
 
 @chat_app.command("list")
 def chat_list_cmd(
-    publication_id: str = typer.Option(
+    publication_id: int = typer.Option(
         ...,
         "--publication-id",
         help="Numeric Substack publication id. REQUIRED: this CLI cannot "
@@ -206,7 +228,22 @@ def chat_list_cmd(
     not user error.
     """
     try:
-        client = _make_client()
+        # Resolve directly — _make_client() silently falls back to
+        # SUBSTACK_COM when no pub URL is configured, but list_threads
+        # needs host "P" (the publication subdomain). A real pub URL is
+        # required; without one we surface a clear actionable error.
+        cookies = resolve_cookies()
+        try:
+            pub_url = resolve_publication_url()
+        except AuthError:
+            emit_error(
+                "chat list requires a configured publication URL — run "
+                "`substack config set-publication <subdomain>` or set "
+                "SUBSTACK_PUBLICATION_URL.",
+                pretty=pretty,
+            )
+            return
+        client = SubstackClient(cookies=cookies, publication_url=pub_url)
         result = list_threads(client, publication_id)
         output_list(result, pretty=pretty, title="Chat Threads")
     except (SubstackApiError, AuthError, ValueError) as exc:
@@ -304,7 +341,9 @@ def chat_unread_cmd(pretty: bool = False):
                 "[bold cyan]Publication Chat unread:[/bold cyan] "
                 f"{result['pubChatUnreadCount']}"
             )
-        output(result, pretty=pretty)
+            output(result, pretty=False)  # JSON to stdout; Rich line already printed
+        else:
+            output(result, pretty=pretty)
     except (SubstackApiError, AuthError, ValueError) as exc:
         _emit_chat_error(exc, pretty)
     except Exception as exc:
