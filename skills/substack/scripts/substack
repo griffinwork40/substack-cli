@@ -1,20 +1,25 @@
-#!/usr/bin/env python3
-"""substack — Substack CLI (unofficial API wrapper)"""
-import sys
-import os
+#!/usr/bin/env bash
+# substack — Substack CLI (unofficial API wrapper)
+# Runs the substack_cli package from a venv adjacent to this script.
+set -euo pipefail
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# Resolve symlinks so venv-relative paths work when called via a symlink.
+SELF="$0"
+while [ -L "$SELF" ]; do
+    LINK="$(readlink "$SELF")"
+    case "$LINK" in /*) SELF="$LINK" ;; *) SELF="$(dirname "$SELF")/$LINK" ;; esac
+done
+DIR="$(cd "$(dirname "$SELF")" && pwd)"
 
-# Import command modules FIRST so their @app.command() / @x_app.command()
-# decorators register before main() invokes the Typer app.
-from substack_cli import config as _config  # noqa: E402, F401
-from substack_cli import read as _read      # noqa: E402, F401
-from substack_cli import publish as _publish  # noqa: E402, F401
-from substack_cli import manage as _manage    # noqa: E402, F401
-from substack_cli import notes as _notes      # noqa: E402, F401
-from substack_cli import chat as _chat        # noqa: E402, F401
+# Prefer a venv at $DIR/../../../.venv (repo root) or $DIR/../.venv (skill root),
+# falling back to the system Python if neither exists.
+if [ -x "$DIR/../../../.venv/bin/python" ]; then
+    PYTHON="$DIR/../../../.venv/bin/python"
+elif [ -x "$DIR/../.venv/bin/python" ]; then
+    PYTHON="$DIR/../.venv/bin/python"
+else
+    PYTHON="$(command -v python3 || command -v python)"
+fi
 
-from substack_cli.app import main  # noqa: E402
-
-if __name__ == "__main__":
-    main()
+export PYTHONPATH="$DIR${PYTHONPATH:+:$PYTHONPATH}"
+exec "$PYTHON" -m substack_cli "$@"
