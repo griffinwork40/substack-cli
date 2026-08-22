@@ -252,6 +252,26 @@ class SubstackClient:
     ) -> Any:
         return self._request("DELETE", path, host=host, **params)
 
+    def download(self, url: str) -> bytes:
+        """Fetch a raw URL (e.g. a pre-signed S3 download link) and return bytes.
+
+        Used for downloading CSV export files whose URL is an absolute HTTPS
+        address (not a publication-relative path). Throttled but NOT retried on
+        transport errors — re-requesting a pre-signed URL is safe, but the
+        simplest safe default is to surface the error and let the caller decide.
+        Raises SubstackApiError on non-2xx or transport errors.
+        """
+        self._throttle()
+        try:
+            response = self._httpx_client.get(url)
+        except httpx.HTTPError as exc:
+            raise SubstackApiError(
+                self._redact_message(f"Download failed: {exc}"), status_code=None
+            ) from exc
+        self._last_request_time = time.time()
+        self._raise_for_status(response)
+        return response.content
+
 
 # ---------------------------------------------------------------------------
 # Output helpers

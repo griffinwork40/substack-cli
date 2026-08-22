@@ -1,6 +1,7 @@
 """Substack CLI — read operations (archive, posts, feed, comments, search,
 subscriber stats, analytics). All GET-only except subscriber-stats (POST)."""
 import sys
+import time
 import xml.etree.ElementTree as ET
 from typing import Any, Optional
 
@@ -276,7 +277,7 @@ def search_archive(client: SubstackClient, query: str, *, limit: int = 25) -> li
     return extract_list(data, "posts")
 
 
-_SUBSCRIBER_STATS_PAGE_SIZE = 25  # API default and max per call
+_SUBSCRIBER_STATS_PAGE_SIZE = 2000  # API accepts up to 5000; 2000 is a good balance (speed vs memory)
 
 
 def get_subscriber_stats(
@@ -372,6 +373,141 @@ def get_subscriber_stats(
 def get_publish_dashboard_summary(client: SubstackClient) -> dict:
     """Get the publish dashboard summary (subscriber count, open rates, etc.)."""
     return client.get("/api/v1/publish-dashboard/summary")
+
+
+# ---------------------------------------------------------------------------
+# Subscriber CSV export
+# ---------------------------------------------------------------------------
+#
+# Substack exposes an async job surface for bulk CSV export:
+#
+#   POST /api/v1/publication_export  →  triggers a new job; returns a job id /
+#                                        job list envelope.
+#   GET  /api/v1/publication_export  →  returns the current job list; poll
+#                                        until status=="complete" and a
+#                                        download_url is present.
+#
+# The POST body shape is uncertain (community-confirmed endpoint, unverified
+# body). An empty body `{}` is tried first (the most common pattern for
+# "fire-and-forget" export triggers in Substack's API). If the upload URL
+# field name or status sentinel differs from "download_url" / "complete",
+# the polling step leaves a clear TODO comment.
+#
+# Confidence: medium — endpoint community-confirmed; body shape and exact
+# response fields are unverified. Re-probe with DevTools before trusting.
+
+# How long to wait between poll attempts and the hard timeout.
+_EXPORT_POLL_INTERVAL_S = 5.0
+_EXPORT_POLL_TIMEOUT_S = 300.0  # 5 minutes max
+
+
+def trigger_csv_export(client: SubstackClient) -> dict:
+    """Trigger a new subscriber CSV export job.
+
+    Issues POST /api/v1/publication_export with an empty body (the simplest
+    tried-first shape per the task spec — re-verify the body with DevTools
+    if this 400s or returns an unexpected shape).
+
+    Returns the raw API response (a job object or a job-list envelope).
+    """
+    # TODO(body-shape): if `{}` triggers a 400, try adding
+    # `{"type": "subscribers"}` or `{"export_type": "subscribers"}` —
+    # re-probe with DevTools capture on the Substack dashboard export page.
+    return client.post("/api/v1/publication_export", json_body={})
+
+
+def poll_csv_export(client: SubstackClient, *, timeout_s: float = _EXPORT_POLL_TIMEOUT_S) -> dict:
+    """Poll GET /api/v1/publication_export until the most-recent job is done.
+
+    Returns the completed job dict (fields: id, status, download_url, …).
+    Raises SubstackApiError if:
+    - the endpoint returns an error response
+    - no complete job with a download_url appears before timeout_s expires
+    - all jobs are in a terminal-failed state
+
+    Response-shape assumptions (medium confidence — re-verify with DevTools):
+    - The response is either a list of job dicts OR {"exports": [...]} envelope.
+    - A job dict has a "status" field that equals "complete" when done.
+    - A completed job has a "download_url" field containing the CSV download URL.
+    """
+    deadline = time.time() + timeout_s
+    while True:
+        raw = client.get("/api/v1/publication_export")
+
+        # Normalise: the response may be a bare list or an envelope.
+        if isinstance(raw, list):
+            jobs = raw
+        elif isinstance(raw, dict):
+            # Try common envelope keys; fall back to a single-job dict.
+            jobs = (
+                raw.get("exports")
+                or raw.get("jobs")
+                or raw.get("items")
+                or raw.get("data")
+            )
+            if jobs is None:
+                # Single job dict returned directly
+                jobs = [raw]
+        else:
+            raise SubstackApiError(
+                f"Unexpected /publication_export response shape: {type(raw).__name__}",
+                status_code=None,
+            )
+
+        if not isinstance(jobs, list):
+            raise SubstackApiError(
+                "Could not extract job list from /publication_export response.",
+                status_code=None,
+            )
+
+        # Check for a completed job — take the most-recent one if multiple exist.
+        # Sort by id (descending) as a best-effort recency heuristic.
+        completed = [
+            j for j in jobs
+            if isinstance(j, dict)
+            and j.get("status") == "complete"
+            and j.get("download_url")
+        ]
+        if completed:
+            completed.sort(key=lambda j: j.get("id", 0), reverse=True)
+            return completed[0]
+
+        # Check for terminal failure.
+        failed = [
+            j for j in jobs
+            if isinstance(j, dict) and j.get("status") in ("failed", "error", "cancelled")
+        ]
+        if failed and len(failed) == len(jobs):
+            raise SubstackApiError(
+                f"CSV export job failed with status={failed[0].get('status')!r}. "
+                "Check the Substack dashboard for details.",
+                status_code=None,
+                body=failed[0],
+            )
+
+        if time.time() >= deadline:
+            # Surface the last-known statuses to aid debugging.
+            statuses = {j.get("status") for j in jobs if isinstance(j, dict)}
+            raise SubstackApiError(
+                f"CSV export did not complete within {timeout_s:.0f}s "
+                f"(last seen statuses: {statuses}). "
+                "Try again — large exports can take several minutes.",
+                status_code=None,
+            )
+
+        print(
+            f"Waiting for CSV export … (jobs: {[j.get('status') for j in jobs if isinstance(j, dict)]})",
+            file=sys.stderr,
+        )
+        time.sleep(_EXPORT_POLL_INTERVAL_S)
+
+
+def download_csv(client: SubstackClient, download_url: str) -> bytes:
+    """Download the CSV from the pre-signed URL returned by the export job.
+
+    Returns the raw bytes — caller decides whether to write to disk or stdout.
+    """
+    return client.download(download_url)
 
 
 def get_post_analytics(client: SubstackClient, post_id: int) -> dict:
@@ -691,6 +827,84 @@ def subscribers_stats_cmd(
         client = _make_client()
         result = get_subscriber_stats(client, offset=offset, limit=limit)
         output(result, pretty=pretty)
+    except (SubstackApiError, AuthError) as exc:
+        emit_error(str(exc), status_code=getattr(exc, "status_code", None), pretty=pretty)
+    except Exception as exc:
+        emit_error(f"Unexpected error: {exc}", pretty=pretty)
+
+
+@subscribers_app.command("export")
+def subscribers_export_cmd(
+    output_file: Optional[str] = typer.Option(
+        None,
+        "--output",
+        "-o",
+        help=(
+            "Write the CSV to this file path instead of stdout. "
+            "Creates parent directories if needed."
+        ),
+    ),
+    timeout: int = typer.Option(
+        300,
+        "--timeout",
+        help="Max seconds to wait for the export job to complete (default 300).",
+    ),
+    pretty: bool = False,
+):
+    """Export all subscribers to CSV via Substack's async export job API.
+
+    This is significantly faster than paginating `subscribers stats` for
+    large lists. The command:
+
+    \b
+    1. Triggers a new export job (POST /api/v1/publication_export).
+    2. Polls GET /api/v1/publication_export until the job is complete.
+    3. Downloads the CSV from the returned URL.
+    4. Writes the CSV to stdout (default) or --output FILE.
+
+    \b
+    CONFIDENCE NOTE: The export endpoint is community-confirmed but the
+    POST body shape is unverified. An empty body {} is tried first — if
+    that triggers a 400, see the TODO in read.py:trigger_csv_export().
+    """
+    try:
+        client = _make_client()
+
+        print("Triggering CSV export job …", file=sys.stderr)
+        trigger_csv_export(client)
+
+        print("Polling for export completion …", file=sys.stderr)
+        job = poll_csv_export(client, timeout_s=float(timeout))
+
+        download_url = job.get("download_url")
+        if not download_url:
+            raise SubstackApiError(
+                f"Export job completed but no download_url in response: {job}",
+                status_code=None,
+            )
+
+        print(f"Downloading CSV from export job {job.get('id', '?')} …", file=sys.stderr)
+        csv_bytes = download_csv(client, download_url)
+
+        if output_file:
+            import os
+            os.makedirs(os.path.dirname(os.path.abspath(output_file)), exist_ok=True)
+            with open(output_file, "wb") as fh:
+                fh.write(csv_bytes)
+            # Emit a JSON confirmation to stdout (consistent with other commands)
+            output(
+                {
+                    "status": "ok",
+                    "path": output_file,
+                    "bytes": len(csv_bytes),
+                    "job_id": job.get("id"),
+                },
+                pretty=pretty,
+            )
+        else:
+            # Write raw CSV bytes to stdout — binary-safe via buffer
+            sys.stdout.buffer.write(csv_bytes)
+
     except (SubstackApiError, AuthError) as exc:
         emit_error(str(exc), status_code=getattr(exc, "status_code", None), pretty=pretty)
     except Exception as exc:
