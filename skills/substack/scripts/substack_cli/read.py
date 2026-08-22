@@ -1,5 +1,6 @@
 """Substack CLI — read operations (archive, posts, feed, comments, search,
 subscriber stats, analytics). All GET-only except subscriber-stats (POST)."""
+import sys
 import xml.etree.ElementTree as ET
 from typing import Any, Optional
 
@@ -275,21 +276,97 @@ def search_archive(client: SubstackClient, query: str, *, limit: int = 25) -> li
     return extract_list(data, "posts")
 
 
-def get_subscriber_stats(client: SubstackClient) -> dict:
+_SUBSCRIBER_STATS_PAGE_SIZE = 25  # API default and max per call
+
+
+def get_subscriber_stats(
+    client: SubstackClient,
+    *,
+    offset: int = 0,
+    limit: int = 0,
+) -> dict:
     """Get subscriber statistics. Uses POST (per community documentation).
-    If a 404 occurs, the verb may have changed — surfaces a clear message."""
-    body: dict = {"filters": {}, "limit": 25, "offset": 0}
-    try:
-        return client.post("/api/v1/subscriber-stats", json_body=body)
-    except SubstackApiError as exc:
-        if exc.status_code == 404:
-            raise SubstackApiError(
-                "Unexpected 404 on subscriber-stats — the verb may have "
-                "changed from POST. Verify the endpoint at "
-                "substack-api-reference.md.",
-                status_code=404,
-            ) from exc
-        raise
+
+    offset: starting index (default 0).
+    limit:  maximum subscribers to return. 0 (default) means fetch ALL —
+            auto-paginates until the full list is collected; progress is
+            printed to stderr.
+
+    Returns the raw API envelope from the *last* page enriched with a
+    ``subscribers`` key that holds the full accumulated list, plus the
+    top-level ``count`` and ``chartCounts`` from the first page.
+
+    If a 404 occurs, the verb may have changed — surfaces a clear message.
+    """
+    page_size = _SUBSCRIBER_STATS_PAGE_SIZE
+    fetch_all = limit == 0
+
+    def _one_page(off: int, sz: int) -> dict:
+        body: dict = {"filters": {}, "limit": sz, "offset": off}
+        try:
+            return client.post("/api/v1/subscriber-stats", json_body=body)
+        except SubstackApiError as exc:
+            if exc.status_code == 404:
+                raise SubstackApiError(
+                    "Unexpected 404 on subscriber-stats — the verb may have "
+                    "changed from POST. Verify the endpoint at "
+                    "substack-api-reference.md.",
+                    status_code=404,
+                ) from exc
+            raise
+
+    if not fetch_all:
+        # Caller specified an explicit limit — honour it with a single call
+        # (or minimal pages), exactly like archive's --offset/--limit.
+        first = _one_page(offset, min(limit, page_size))
+        if limit <= page_size:
+            return first
+        # Need more than one page.
+        subscribers: list = list(first.get("subscribers") or [])
+        total_wanted = limit
+        current_offset = offset + page_size
+        while len(subscribers) < total_wanted:
+            remaining = total_wanted - len(subscribers)
+            page = _one_page(current_offset, min(remaining, page_size))
+            page_subs = page.get("subscribers") or []
+            if not page_subs:
+                break
+            subscribers.extend(page_subs)
+            current_offset += len(page_subs)
+        result = dict(first)
+        result["subscribers"] = subscribers[:total_wanted]
+        return result
+
+    # fetch_all=True: keep going until we have everything.
+    first = _one_page(offset, page_size)
+    total_count = first.get("count", 0)
+    subscribers = list(first.get("subscribers") or [])
+    current_offset = offset + len(subscribers)
+
+    if total_count > page_size:
+        print(
+            f"Fetching all {total_count:,} subscribers "
+            f"(page size {page_size}) …",
+            file=sys.stderr,
+        )
+
+    while len(subscribers) < total_count:
+        page = _one_page(current_offset, page_size)
+        page_subs = page.get("subscribers") or []
+        if not page_subs:
+            break
+        subscribers.extend(page_subs)
+        current_offset += len(page_subs)
+        fetched = len(subscribers)
+        if fetched % (page_size * 20) == 0 or fetched >= total_count:
+            print(
+                f"  … {fetched:,} / {total_count:,} fetched",
+                file=sys.stderr,
+            )
+
+    result = dict(first)
+    result["subscribers"] = subscribers
+    return result
 
 
 def get_publish_dashboard_summary(client: SubstackClient) -> dict:
@@ -592,11 +669,27 @@ def subscribers_count_cmd(pretty: bool = False):
 
 
 @subscribers_app.command("stats")
-def subscribers_stats_cmd(pretty: bool = False):
-    """Get detailed subscriber statistics."""
+def subscribers_stats_cmd(
+    offset: int = typer.Option(0, "--offset", help="Starting subscriber index (default 0)."),
+    limit: int = typer.Option(
+        0,
+        "--limit",
+        help=(
+            "Max subscribers to return. "
+            "0 (default) fetches ALL subscribers via auto-pagination."
+        ),
+    ),
+    pretty: bool = False,
+):
+    """Get detailed subscriber statistics.
+
+    By default fetches ALL subscribers via auto-pagination (progress printed
+    to stderr). Pass --limit N to cap the result, or --offset/--limit to page
+    manually (same pattern as the `archive` command).
+    """
     try:
         client = _make_client()
-        result = get_subscriber_stats(client)
+        result = get_subscriber_stats(client, offset=offset, limit=limit)
         output(result, pretty=pretty)
     except (SubstackApiError, AuthError) as exc:
         emit_error(str(exc), status_code=getattr(exc, "status_code", None), pretty=pretty)
