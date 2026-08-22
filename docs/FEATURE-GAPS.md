@@ -95,12 +95,15 @@ unchanged. Regression test added (`tests/test_config.py`): asserts
 
 ## Tier 2 — Community-confirmed endpoints, real value, buildable
 
-### 4. Subscriber CSV export + full-list enumeration
-`get_subscriber_stats` is hard-capped at `{"limit": 25, "offset": 0}` (`read.py:281`) — no
-pagination, no way to enumerate all subscribers. No export command exists. Upstream offers
-CSV export jobs (`GET /publication_export`, job list + download URL) and paginated/filtered
-`POST /subscriber-stats`.
-**Module:** `read.py` (subscribers subapp). **Confidence: high** (cap is in source); **med** on export endpoint shape.
+### 4. Subscriber CSV export + full-list enumeration ✅ *(FIXED 2026-08-22)*
+~~`get_subscriber_stats` is hard-capped at `{"limit": 25, "offset": 0}` (`read.py:281`) — no
+pagination, no way to enumerate all subscribers. No export command exists.~~
+**Resolved:** `subscribers stats` now auto-paginates to fetch all subscribers (page size bumped to 100,
+limit=0 default triggers full enumeration). New `subscribers export` command added: triggers an async CSV
+export job (`POST /api/v1/publication_export`), polls `GET /api/v1/publication_export` until
+`status=="complete"`, downloads the CSV from the returned `download_url`, and writes to stdout or
+`--output FILE`. 15 tests added (`tests/test_read_csv_export.py`). Body shape of the trigger POST is
+`{}` (unverified — medium confidence; see TODO in `read.py:trigger_csv_export()` if the server returns 400).
 
 ### 5. Rich body authoring (lists, images-in-body, footnotes, paywall, embeds)
 The Markdown→ProseMirror converter raises `NotImplementedError` on lists (`publish.py:116-121`)
