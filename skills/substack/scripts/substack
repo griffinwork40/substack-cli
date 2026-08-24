@@ -3,7 +3,18 @@
 import sys
 import os
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# Auto-activate the sibling .venv if we're running under the wrong interpreter
+# (e.g. system python lacking typer). This makes the shebang portable.
+_script_dir = os.path.dirname(os.path.abspath(__file__))
+_venv = os.path.join(_script_dir, ".venv", "bin", "python3")
+if not _venv.startswith(sys.prefix) and os.path.isfile(_venv):
+    # Also check parent dirs for the venv (repo-root level)
+    for _candidate in [_venv, os.path.join(_script_dir, os.pardir, os.pardir, os.pardir, ".venv", "bin", "python3")]:
+        _candidate = os.path.normpath(_candidate)
+        if os.path.isfile(_candidate) and not sys.prefix.startswith(os.path.dirname(os.path.dirname(_candidate))):
+            os.execv(_candidate, [_candidate] + sys.argv)
+
+sys.path.insert(0, _script_dir)
 
 # Import command modules FIRST so their @app.command() / @x_app.command()
 # decorators register before main() invokes the Typer app.

@@ -277,7 +277,7 @@ def search_archive(client: SubstackClient, query: str, *, limit: int = 25) -> li
     return extract_list(data, "posts")
 
 
-_SUBSCRIBER_STATS_PAGE_SIZE = 2000  # API accepts up to 5000; 2000 is a good balance (speed vs memory)
+_SUBSCRIBER_STATS_PAGE_SIZE = 100  # API hard cap is 100; 4x the original 25
 
 
 def get_subscriber_stats(
