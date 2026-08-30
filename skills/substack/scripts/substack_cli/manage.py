@@ -139,21 +139,47 @@ def create_tag(client: SubstackClient, name: str) -> dict:
     return client.post("/api/v1/publication/post-tag", json_body={"name": name})
 
 
-def delete_tag(client: SubstackClient, tag_id: int) -> Any:
+def resolve_tag_id(client: SubstackClient, tag_id_or_name: str) -> str:
+    """Return a tag UUID, resolving by name (case-insensitive) if needed.
+
+    Accepts either a UUID string (returned as-is) or a tag name.  When a name
+    is supplied the publication's tag list is fetched and matched
+    case-insensitively; a ValueError is raised when no match is found.
+    """
+    import re
+    UUID_RE = re.compile(
+        r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+        re.IGNORECASE,
+    )
+    if UUID_RE.match(tag_id_or_name):
+        return tag_id_or_name
+    # Resolve by name
+    tags = list_tags(client)
+    needle = tag_id_or_name.lower()
+    for tag in tags:
+        if isinstance(tag, dict) and tag.get("name", "").lower() == needle:
+            return tag["id"]
+    raise ValueError(
+        f"No tag named {tag_id_or_name!r} found. "
+        "Run 'tags list' to see available tags and their UUIDs."
+    )
+
+
+def delete_tag(client: SubstackClient, tag_id: str) -> Any:
     """Delete a tag."""
     if not is_write_enabled():
         raise ValueError("Write operations require SUBSTACK_ENABLE_WRITE=true")
     return client.delete(f"/api/v1/publication/post-tag/{tag_id}")
 
 
-def attach_tag(client: SubstackClient, post_id: int, tag_id: int) -> dict:
+def attach_tag(client: SubstackClient, post_id: int, tag_id: str) -> dict:
     """Attach a tag to a post."""
     if not is_write_enabled():
         raise ValueError("Write operations require SUBSTACK_ENABLE_WRITE=true")
     return client.post(f"/api/v1/post/{post_id}/tag/{tag_id}")
 
 
-def detach_tag(client: SubstackClient, post_id: int, tag_id: int) -> Any:
+def detach_tag(client: SubstackClient, post_id: int, tag_id: str) -> Any:
     """Detach a tag from a post."""
     if not is_write_enabled():
         raise ValueError("Write operations require SUBSTACK_ENABLE_WRITE=true")
@@ -355,15 +381,16 @@ def tags_create_cmd(name: str, pretty: bool = False):
 
 
 @tags_app.command("delete")
-def tags_delete_cmd(tag_id: int, yes: bool = False, pretty: bool = False):
-    """Delete a tag. Requires --yes to confirm."""
+def tags_delete_cmd(tag_id: str, yes: bool = False, pretty: bool = False):
+    """Delete a tag (UUID or name). Requires --yes to confirm."""
     if not yes:
         emit_error(f"Refusing to delete tag {tag_id} without --yes.", pretty=pretty)
     if not is_write_enabled():
         emit_error("Write operations require SUBSTACK_ENABLE_WRITE=true", pretty=pretty)
     try:
         client = _make_client()
-        result = delete_tag(client, tag_id)
+        resolved = resolve_tag_id(client, tag_id)
+        result = delete_tag(client, resolved)
         output(result, pretty=pretty)
     except (SubstackApiError, AuthError, ValueError) as exc:
         emit_error(str(exc), status_code=getattr(exc, "status_code", None), pretty=pretty)
@@ -372,13 +399,14 @@ def tags_delete_cmd(tag_id: int, yes: bool = False, pretty: bool = False):
 
 
 @tags_app.command("attach")
-def tags_attach_cmd(post_id: int, tag_id: int, pretty: bool = False):
-    """Attach a tag to a post."""
+def tags_attach_cmd(post_id: int, tag_id: str, pretty: bool = False):
+    """Attach a tag to a post. TAG_ID may be a UUID or a tag name."""
     if not is_write_enabled():
         emit_error("Write operations require SUBSTACK_ENABLE_WRITE=true", pretty=pretty)
     try:
         client = _make_client()
-        result = attach_tag(client, post_id, tag_id)
+        resolved = resolve_tag_id(client, tag_id)
+        result = attach_tag(client, post_id, resolved)
         output(result, pretty=pretty)
     except (SubstackApiError, AuthError, ValueError) as exc:
         emit_error(str(exc), status_code=getattr(exc, "status_code", None), pretty=pretty)
@@ -387,13 +415,14 @@ def tags_attach_cmd(post_id: int, tag_id: int, pretty: bool = False):
 
 
 @tags_app.command("detach")
-def tags_detach_cmd(post_id: int, tag_id: int, pretty: bool = False):
-    """Detach a tag from a post."""
+def tags_detach_cmd(post_id: int, tag_id: str, pretty: bool = False):
+    """Detach a tag from a post. TAG_ID may be a UUID or a tag name."""
     if not is_write_enabled():
         emit_error("Write operations require SUBSTACK_ENABLE_WRITE=true", pretty=pretty)
     try:
         client = _make_client()
-        result = detach_tag(client, post_id, tag_id)
+        resolved = resolve_tag_id(client, tag_id)
+        result = detach_tag(client, post_id, resolved)
         output(result, pretty=pretty)
     except (SubstackApiError, AuthError, ValueError) as exc:
         emit_error(str(exc), status_code=getattr(exc, "status_code", None), pretty=pretty)
