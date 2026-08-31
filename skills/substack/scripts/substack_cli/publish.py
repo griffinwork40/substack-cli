@@ -413,6 +413,7 @@ def drafts_set_cover_cmd(draft_id: int, image_path: str, pretty: bool = False):
             "(env var) or enable_write: true (config)",
             pretty=pretty,
         )
+        return
     try:
         client = _make_client()
         up = upload_image(client, image_path)
@@ -421,6 +422,8 @@ def drafts_set_cover_cmd(draft_id: int, image_path: str, pretty: bool = False):
         output(result, pretty=pretty)
     except (SubstackApiError, AuthError) as exc:
         emit_error(str(exc), status_code=getattr(exc, "status_code", None), pretty=pretty)
+    except FileNotFoundError as exc:
+        emit_error(str(exc), pretty=pretty)
     except Exception as exc:
         emit_error(f"Unexpected error: {exc}", pretty=pretty)
 
