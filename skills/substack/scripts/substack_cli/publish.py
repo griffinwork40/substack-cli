@@ -403,6 +403,28 @@ def drafts_update_cmd(
         emit_error(f"Unexpected error: {exc}", pretty=pretty)
 
 
+@drafts_app.command("set-cover")
+def drafts_set_cover_cmd(draft_id: int, image_path: str, pretty: bool = False):
+    """Set a draft's cover image. Uploads the image, then PUTs the draft with
+    cover_image=<url>. This is a pure draft edit — it does NOT publish."""
+    if not is_write_enabled():
+        emit_error(
+            "Write operations require SUBSTACK_ENABLE_WRITE=true "
+            "(env var) or enable_write: true (config)",
+            pretty=pretty,
+        )
+    try:
+        client = _make_client()
+        up = upload_image(client, image_path)
+        url = up["url"]
+        result = update_draft(client, draft_id, cover_image=url)
+        output(result, pretty=pretty)
+    except (SubstackApiError, AuthError) as exc:
+        emit_error(str(exc), status_code=getattr(exc, "status_code", None), pretty=pretty)
+    except Exception as exc:
+        emit_error(f"Unexpected error: {exc}", pretty=pretty)
+
+
 @drafts_app.command("delete")
 def drafts_delete_cmd(id: int, yes: bool = False, pretty: bool = False):
     """Delete a draft. Requires --yes to confirm."""
