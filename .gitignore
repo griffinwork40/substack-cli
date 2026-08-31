@@ -35,3 +35,12 @@ config.json
 .idea/
 .vscode/
 *.swp
+
+# AFK agent runtime
+.afk/
+.afk-worktrees/
+AFK.md
+
+# Scratch / one-off artifacts
+cover-studio/
+market-research/
