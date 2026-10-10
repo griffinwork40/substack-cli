@@ -167,6 +167,7 @@ substack notes get c-98765                           # single note (accepts 9876
 # create: publishes IMMEDIATELY + cannot be edited -> requires --yes
 SUBSTACK_ENABLE_WRITE=true substack notes create "Shipping Notes support today. **Big.**" --yes
 SUBSTACK_ENABLE_WRITE=true substack notes create --body-json ./note.json --yes    # rich ProseMirror body
+SUBSTACK_ENABLE_WRITE=true substack notes create "Chart of the day" --image ./chart.png --yes   # attach an image (repeat --image for several)
 SUBSTACK_ENABLE_WRITE=true substack notes create "Subscribers only" --reply-min-role paid_subscriber --yes
 # reply: threads a reply under a parent note (accepts 98765 or c-98765); also immediate + uneditable -> requires --yes
 SUBSTACK_ENABLE_WRITE=true substack notes reply 98765 "Great point — totally agree." --yes

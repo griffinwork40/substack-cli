@@ -17,6 +17,7 @@ from substack_cli.notes import (
     _normalize_comment_id,
     _text_to_note_doc,
     create_note,
+    create_note_image_attachment,
     delete_note,
     get_note,
     list_notes,
@@ -354,6 +355,119 @@ def test_make_client_falls_back_to_substack_com_without_pub_url(
 
 
 # ---------------------------------------------------------------------------
+# Image attachments (--image)
+# ---------------------------------------------------------------------------
+
+CDN_URL = "https://substack-post-media.s3.amazonaws.com/public/images/fake.png"
+
+
+@pytest.fixture
+def note_image(tmp_path):
+    path = tmp_path / "pic.png"
+    path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 32)
+    return str(path)
+
+
+def _mock_image_routes(attachment_ids=("att-1",)):
+    """Mock upload + attachment on host A; returns (upload, attach) routes."""
+    upload = respx.post(f"{SUBSTACK_COM}/api/v1/image").mock(
+        return_value=httpx.Response(200, json={"url": CDN_URL, "imageWidth": 10})
+    )
+    attach = respx.post(f"{SUBSTACK_COM}/api/v1/comment/attachment").mock(
+        side_effect=[httpx.Response(200, json={"id": i}) for i in attachment_ids]
+    )
+    return upload, attach
+
+
+@respx.mock
+def test_create_note_image_attachment_uploads_then_registers_on_host_a(
+    fake_cookies, fake_publication_url, note_image
+):
+    upload, attach = _mock_image_routes()
+    client = SubstackClient(cookies=fake_cookies, publication_url=fake_publication_url)
+    assert create_note_image_attachment(client, note_image) == "att-1"
+    assert "data:image/png;base64," in json.loads(upload.calls[0].request.content)["image"]
+    assert json.loads(attach.calls[0].request.content) == {"url": CDN_URL, "type": "image"}
+
+
+@respx.mock
+def test_create_note_with_images_sends_attachment_ids_in_order(
+    fake_cookies, fake_publication_url, isolated_config, write_enabled_env, note_image
+):
+    upload, attach = _mock_image_routes(("att-1", "att-2"))
+    feed = respx.post(f"{SUBSTACK_COM}/api/v1/comment/feed").mock(
+        return_value=httpx.Response(200, json={"id": 77})
+    )
+    client = SubstackClient(cookies=fake_cookies, publication_url=fake_publication_url)
+    result = create_note(client, text="With pics", image_paths=[note_image, note_image])
+    assert result == {"id": 77}
+    assert upload.call_count == 2 and attach.call_count == 2
+    sent = json.loads(feed.calls[0].request.content)
+    assert sent["attachmentIds"] == ["att-1", "att-2"]
+    assert sent["bodyJson"]["type"] == "doc"
+
+
+@respx.mock
+def test_create_note_without_images_omits_attachment_ids(
+    fake_cookies, fake_publication_url, isolated_config, write_enabled_env
+):
+    feed = respx.post(f"{SUBSTACK_COM}/api/v1/comment/feed").mock(
+        return_value=httpx.Response(200, json={"id": 1})
+    )
+    client = SubstackClient(cookies=fake_cookies, publication_url=fake_publication_url)
+    create_note(client, text="Plain")
+    assert "attachmentIds" not in json.loads(feed.calls[0].request.content)
+
+
+@respx.mock
+def test_create_note_missing_image_fails_before_any_http(
+    fake_cookies, fake_publication_url, isolated_config, write_enabled_env, tmp_path
+):
+    feed = respx.post(f"{SUBSTACK_COM}/api/v1/comment/feed").mock(
+        return_value=httpx.Response(200, json={"id": 1})
+    )
+    client = SubstackClient(cookies=fake_cookies, publication_url=fake_publication_url)
+    with pytest.raises(ValueError, match="Image file not found"):
+        create_note(client, text="x", image_paths=[str(tmp_path / "nope.png")])
+    assert not feed.called
+
+
+@respx.mock
+def test_create_note_failed_upload_never_publishes(
+    fake_cookies, fake_publication_url, isolated_config, write_enabled_env, note_image
+):
+    respx.post(f"{SUBSTACK_COM}/api/v1/image").mock(
+        return_value=httpx.Response(400, json={"error": "bad image"})
+    )
+    feed = respx.post(f"{SUBSTACK_COM}/api/v1/comment/feed").mock(
+        return_value=httpx.Response(200, json={"id": 1})
+    )
+    client = SubstackClient(cookies=fake_cookies, publication_url=fake_publication_url)
+    with pytest.raises(SubstackApiError):
+        create_note(client, text="x", image_paths=[note_image])
+    assert not feed.called
+
+
+@respx.mock
+def test_create_note_attachment_without_id_raises_and_never_publishes(
+    fake_cookies, fake_publication_url, isolated_config, write_enabled_env, note_image
+):
+    respx.post(f"{SUBSTACK_COM}/api/v1/image").mock(
+        return_value=httpx.Response(200, json={"url": CDN_URL})
+    )
+    respx.post(f"{SUBSTACK_COM}/api/v1/comment/attachment").mock(
+        return_value=httpx.Response(200, json={})
+    )
+    feed = respx.post(f"{SUBSTACK_COM}/api/v1/comment/feed").mock(
+        return_value=httpx.Response(200, json={"id": 1})
+    )
+    client = SubstackClient(cookies=fake_cookies, publication_url=fake_publication_url)
+    with pytest.raises(SubstackApiError):
+        create_note(client, text="x", image_paths=[note_image])
+    assert not feed.called
+
+
+# ---------------------------------------------------------------------------
 # CLI command gates (via CliRunner)
 # ---------------------------------------------------------------------------
 
@@ -431,3 +545,29 @@ def test_cli_reply_accepts_c_prefixed_parent_id(
     assert result.exit_code == 0
     sent = json.loads(route.calls[0].request.content)
     assert sent["parent_id"] == 100  # the `c-` prefix is stripped
+
+
+@respx.mock
+def test_cli_create_with_image_flag(
+    isolated_config, authed_env, write_enabled_env, cli_runner, note_image
+):
+    _mock_image_routes(("att-9",))
+    feed = respx.post(f"{SUBSTACK_COM}/api/v1/comment/feed").mock(
+        return_value=httpx.Response(200, json={"id": 999})
+    )
+    result = cli_runner.invoke(
+        notes_app, ["create", "Look at this", "--image", note_image, "--yes"]
+    )
+    assert result.exit_code == 0, result.output
+    assert json.loads(feed.calls[0].request.content)["attachmentIds"] == ["att-9"]
+
+
+def test_cli_create_missing_image_errors_without_publishing(
+    isolated_config, authed_env, write_enabled_env, cli_runner, tmp_path
+):
+    """No respx routes: a missing --image must fail before any HTTP call."""
+    result = cli_runner.invoke(
+        notes_app, ["create", "x", "--image", str(tmp_path / "nope.png"), "--yes"]
+    )
+    assert result.exit_code != 0
+    assert "Image file not found" in result.output
