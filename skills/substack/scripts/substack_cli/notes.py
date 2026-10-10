@@ -8,7 +8,7 @@ even though the UI calls them Notes:
     REPLY   POST   /api/v1/comment/feed                   (body adds parent_id)
     LIST    GET    /api/v1/reader/feed                    (personalized home)
             GET    /api/v1/reader/feed/profile/{user_id}  (a user's own notes)
-    GET     GET    /api/v1/reader/feed/c-{comment_id}     (single note)
+    GET     GET    /api/v1/reader/comment/{comment_id}    (single note -> {item})
     DELETE  DELETE /api/v1/comment/{comment_id}
 
 All Notes endpoints are served from the bare `substack.com` host (host "A"),
@@ -221,8 +221,11 @@ def list_notes(
 
 
 def get_note(client: SubstackClient, comment_id: int) -> dict:
-    """Get a single note by its numeric comment id."""
-    return client.get(f"/api/v1/reader/feed/c-{comment_id}", host="A")
+    """Get a single note by its numeric comment id.
+
+    Returns {"item": {..., "comment": {...}}}. (The older
+    /api/v1/reader/feed/c-{id} path 404s for every id as of 2026-10.)"""
+    return client.get(f"/api/v1/reader/comment/{comment_id}", host="A")
 
 
 def delete_note(client: SubstackClient, comment_id: int) -> Any:

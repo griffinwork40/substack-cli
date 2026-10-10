@@ -301,8 +301,8 @@ def test_list_notes_mine_resolves_self_then_profile_feed(
 # ---------------------------------------------------------------------------
 
 @respx.mock
-def test_get_note_hits_reader_feed_entity_key(fake_cookies, fake_publication_url):
-    route = respx.get(f"{SUBSTACK_COM}/api/v1/reader/feed/c-12345").mock(
+def test_get_note_hits_reader_comment_endpoint(fake_cookies, fake_publication_url):
+    route = respx.get(f"{SUBSTACK_COM}/api/v1/reader/comment/12345").mock(
         return_value=httpx.Response(200, json={"item": {"id": 12345}})
     )
     client = SubstackClient(cookies=fake_cookies, publication_url=fake_publication_url)
