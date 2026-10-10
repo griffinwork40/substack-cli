@@ -281,9 +281,12 @@ def get_scheduled_release(client: SubstackClient, draft_id: int) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def upload_image(client: SubstackClient, image_path: str) -> dict:
+def upload_image(client: SubstackClient, image_path: str, *, host: str = "P") -> dict:
     """Upload an image to Substack. Uses JSON + base64 encoding (not
     multipart — multipart reportedly 400s on this endpoint).
+
+    `host` defaults to the publication ("P"); Notes pass "A" (substack.com)
+    so accounts without a publication can still attach images.
 
     Response fields: bytes, imageWidth, imageHeight, url.
     """
@@ -299,7 +302,7 @@ def upload_image(client: SubstackClient, image_path: str) -> dict:
         encoded = base64.b64encode(f.read()).decode("ascii")
 
     body = {"image": f"data:image/{ext};base64,{encoded}"}
-    return client.post("/api/v1/image", json_body=body)
+    return client.post("/api/v1/image", host=host, json_body=body)
 
 
 # ---------------------------------------------------------------------------

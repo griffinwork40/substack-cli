@@ -5,6 +5,12 @@ the *comment* system, so the endpoints are named `comment`/`reader/feed`
 even though the UI calls them Notes:
 
     CREATE  POST   /api/v1/comment/feed
+    IMAGE   POST   /api/v1/image                         (upload -> CDN url)
+            POST   /api/v1/comment/attachment            ({url, type:"image"} -> {id})
+                   then CREATE with attachmentIds: [id, ...]
+    DRAFT   POST   /api/v1/comment/draft                  (saved, NOT published;
+                                                           add trigger_at to schedule)
+    DRAFTS  GET    /api/v1/feed/drafts                    (saved + scheduled drafts)
     REPLY   POST   /api/v1/comment/feed                   (body adds parent_id)
     LIST    GET    /api/v1/reader/feed                    (personalized home)
             GET    /api/v1/reader/feed/profile/{user_id}  (a user's own notes)
@@ -14,10 +20,11 @@ even though the UI calls them Notes:
 All Notes endpoints are served from the bare `substack.com` host (host "A"),
 so — unlike drafts/publication commands — a publication URL is NOT required.
 
-HARD LIMITATION — there is NO edit/update endpoint for Notes. Notes publish
-immediately with no draft state and no undo. The only "update" is to delete
-the note and create a new one (which gets a new id). This is a Substack API
-limitation, not a CLI one.
+HARD LIMITATION — there is NO edit/update endpoint for PUBLISHED Notes. A
+published note has no undo; the only "update" is to delete it and create a new
+one (which gets a new id). To review before anything goes public, save it as a
+draft (`--draft`) or schedule it (`--schedule`): both land in the Drafts tab of
+the Substack Notes composer, where they can be edited, published, or deleted.
 
 Unlike newsletter drafts (whose `draft_body` is a *stringified* ProseMirror
 document), a Note's `bodyJson` is sent as a nested JSON *object*.
@@ -29,7 +36,8 @@ unofficial API (community-verified via curl in 2026). See
 import json
 import os
 import re
-from typing import Any, Optional
+from datetime import datetime, timezone
+from typing import Any, List, Optional
 
 import typer
 
@@ -50,7 +58,7 @@ from substack_cli.client import (
 )
 # Reuse the shared inline-Markdown parser (bold / italic / links). Notes use
 # the same ProseMirror text-node + mark schema as newsletter posts.
-from substack_cli.publish import _parse_inline
+from substack_cli.publish import _parse_inline, upload_image
 
 # Notes publish for everyone to reply by default. Other known values include
 # "subscriber", "paid_subscriber", "founding". Passed through as-is.
@@ -119,9 +127,73 @@ def _normalize_comment_id(raw: Any) -> int:
     return int(s)
 
 
+def _validate_image_paths(image_paths: Optional[List[str]]) -> List[str]:
+    """Check every --image path up front so a bad path fails BEFORE any
+    upload or publish (notes cannot be edited after the fact)."""
+    paths = list(image_paths or [])
+    for p in paths:
+        if not os.path.isfile(p):
+            raise ValueError(f"Image file not found: {p}")
+    return paths
+
+
+def _parse_schedule(value: str, *, now: Optional[datetime] = None) -> str:
+    """Parse a --schedule time into Substack's `trigger_at` format
+    (UTC ISO-8601 with milliseconds and a trailing Z).
+
+    Accepts ISO-8601 like "2026-10-12T09:00", "2026-10-12 09:00",
+    "2026-10-12T09:00-04:00" or "...Z". A time with no offset is read as
+    this machine's local time. Raises ValueError if unparseable or not in the
+    future.
+    """
+    raw = value.strip()
+    if raw.endswith(("Z", "z")):
+        raw = raw[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(raw)
+    except ValueError as exc:
+        raise ValueError(
+            f"Invalid --schedule time {value!r}. Use ISO-8601, e.g. "
+            "2026-10-12T09:00 (local time) or 2026-10-12T13:00Z (UTC)."
+        ) from exc
+    if dt.tzinfo is None:
+        dt = dt.astimezone()  # naive -> this machine's local timezone
+    dt = dt.astimezone(timezone.utc)
+    if dt <= (now or datetime.now(timezone.utc)):
+        raise ValueError(f"--schedule time {value!r} is not in the future.")
+    return dt.strftime("%Y-%m-%dT%H:%M:%S.") + f"{dt.microsecond // 1000:03d}Z"
+
+
 # ---------------------------------------------------------------------------
 # Core operations (pure functions — take a client, return API data)
 # ---------------------------------------------------------------------------
+
+
+def create_note_image_attachment(client: SubstackClient, image_path: str) -> str:
+    """Upload a local image and register it as a Note attachment.
+
+    Two calls, both on host "A" (substack.com):
+      1. POST /api/v1/image               -> {url, imageWidth, ...}
+      2. POST /api/v1/comment/attachment  {url, type: "image"} -> {id}
+    Returns the attachment id to pass in the note's `attachmentIds`.
+    """
+    uploaded = upload_image(client, image_path, host="A")
+    url = uploaded.get("url") if isinstance(uploaded, dict) else None
+    if not url:
+        raise SubstackApiError(
+            f"Image upload for {image_path} returned no 'url' field."
+        )
+    attachment = client.post(
+        "/api/v1/comment/attachment",
+        host="A",
+        json_body={"url": url, "type": "image"},
+    )
+    attachment_id = attachment.get("id") if isinstance(attachment, dict) else None
+    if not attachment_id:
+        raise SubstackApiError(
+            f"Creating the note attachment for {image_path} returned no 'id' field."
+        )
+    return attachment_id
 
 
 def create_note(
@@ -130,9 +202,22 @@ def create_note(
     text: Optional[str] = None,
     body_json: Optional[str] = None,
     reply_minimum_role: str = DEFAULT_REPLY_MINIMUM_ROLE,
+    image_paths: Optional[List[str]] = None,
+    draft: bool = False,
+    trigger_at: Optional[str] = None,
 ) -> dict:
-    """Publish a Note. `body_json` (a full ProseMirror doc) takes precedence
+    """Publish a Note, or save it as a draft.
+
+    `draft=True` saves to the Notes Drafts tab via POST /api/v1/comment/draft
+    instead of publishing. `trigger_at` (Substack's UTC format, see
+    `_parse_schedule`) schedules it: it is saved as a draft that Substack
+    publishes automatically at that time. A trigger_at implies draft.
+ `body_json` (a full ProseMirror doc) takes precedence
     over `text`. The `bodyJson` is sent as a nested object, NOT stringified.
+
+    `image_paths` (local files) are uploaded and attached via
+    `attachmentIds`. All images are validated and uploaded BEFORE the note is
+    posted, so a failed upload never leaves a half-published note.
 
     Requires SUBSTACK_ENABLE_WRITE=true (defense-in-depth — the command layer
     also gates)."""
@@ -147,9 +232,25 @@ def create_note(
         doc = _text_to_note_doc(text)
     else:
         raise ValueError("Provide note text or --body-json.")
+    paths = _validate_image_paths(image_paths)
 
-    body = {"bodyJson": doc, "replyMinimumRole": reply_minimum_role}
+    attachment_ids = [create_note_image_attachment(client, p) for p in paths]
+
+    body: dict = {"bodyJson": doc, "replyMinimumRole": reply_minimum_role}
+    if attachment_ids:
+        body["attachmentIds"] = attachment_ids
+    if draft or trigger_at:
+        # Shape captured from the web composer's save/schedule call.
+        body.update({"tabId": "for-you", "surface": "feed"})
+        if trigger_at:
+            body["trigger_at"] = trigger_at
+        return client.post("/api/v1/comment/draft", host="A", json_body=body)
     return client.post("/api/v1/comment/feed", host="A", json_body=body)
+
+
+def list_draft_notes(client: SubstackClient, *, limit: int = 20) -> Any:
+    """List your saved and scheduled Note drafts (newest first)."""
+    return client.get("/api/v1/feed/drafts", host="A", limit=limit)
 
 
 def reply_to_note(
@@ -272,28 +373,62 @@ def notes_create_cmd(
         help="Path to a JSON file or a raw ProseMirror bodyJson document. "
         "Overrides TEXT — use for rich content (mentions, images, etc.).",
     ),
+    image: Optional[List[str]] = typer.Option(
+        None,
+        "--image",
+        help="Local image file to attach (png/jpg/gif/webp). Repeat the flag "
+        "to attach several. Uploaded before the note is posted.",
+    ),
     reply_min_role: str = typer.Option(
         DEFAULT_REPLY_MINIMUM_ROLE,
         "--reply-min-role",
         help="Who may reply: everyone | subscriber | paid_subscriber | founding.",
+    ),
+    draft: bool = typer.Option(
+        False,
+        "--draft",
+        help="Save to your Notes Drafts instead of publishing. Nothing goes "
+        "public; --yes is not needed.",
+    ),
+    schedule: str = typer.Option(
+        None,
+        "--schedule",
+        help="Schedule for a future time (ISO-8601, e.g. 2026-10-12T09:00 in "
+        "local time, or ...Z for UTC). Saved as a draft that auto-publishes "
+        "then. Requires --yes.",
     ),
     yes: bool = typer.Option(
         False, "--yes", help="Confirm publishing (notes are immediate + uneditable)."
     ),
     pretty: bool = False,
 ):
-    """Publish a Note.
+    """Publish a Note, or save it as a draft (--draft) or schedule it (--schedule).
 
-    Notes publish IMMEDIATELY to your public feed and CANNOT be edited (only
-    deleted) — so this command requires --yes, like `drafts publish`.
+    Published notes go out IMMEDIATELY and CANNOT be edited (only deleted), so
+    publishing requires --yes. --draft saves privately to the Drafts tab of the
+    Notes composer (no --yes needed). --schedule auto-publishes later, so it
+    also requires --yes. Attach images with --image.
     """
     if text is None and body_json is None:
         emit_error("Provide note text or --body-json.", pretty=pretty)
-    if not yes:
+    trigger_at = None
+    if schedule is not None:
+        try:
+            trigger_at = _parse_schedule(schedule)
+        except ValueError as exc:
+            emit_error(str(exc), pretty=pretty)
+    if schedule is not None and not yes:
+        emit_error(
+            "Refusing to schedule note without --yes. A scheduled note "
+            "publishes automatically at that time. Re-run with --yes to confirm, "
+            "or use --draft alone to save it without a publish time.",
+            pretty=pretty,
+        )
+    if not yes and not draft:
         emit_error(
             "Refusing to publish note without --yes. Notes publish immediately "
             "to your public feed and cannot be edited (only deleted). "
-            "Re-run with --yes to confirm.",
+            "Re-run with --yes to confirm, or use --draft to save it unpublished.",
             pretty=pretty,
         )
     if not is_write_enabled():
@@ -303,9 +438,16 @@ def notes_create_cmd(
             pretty=pretty,
         )
     try:
+        _validate_image_paths(image)  # fail fast, before auth or any HTTP
         client = _make_client()
         result = create_note(
-            client, text=text, body_json=body_json, reply_minimum_role=reply_min_role
+            client,
+            text=text,
+            body_json=body_json,
+            reply_minimum_role=reply_min_role,
+            image_paths=image,
+            draft=draft,
+            trigger_at=trigger_at,
         )
         output(result, pretty=pretty)
     except (SubstackApiError, AuthError, ValueError) as exc:
@@ -394,6 +536,29 @@ def notes_list_cmd(
         client = _make_client()
         result = list_notes(client, user_id=user_id, mine=mine, limit=limit)
         output_list(result, pretty=pretty, title="Notes")
+    except (SubstackApiError, AuthError, ValueError) as exc:
+        emit_error(str(exc), status_code=getattr(exc, "status_code", None), pretty=pretty)
+    except Exception as exc:
+        emit_error(f"Unexpected error: {exc}", pretty=pretty)
+
+
+@notes_app.command("drafts")
+def notes_drafts_cmd(
+    limit: int = typer.Option(20, "--limit", help="Max drafts to return."),
+    pretty: bool = False,
+):
+    """List your saved and scheduled Note drafts.
+
+    Scheduled drafts carry a `trigger_at`. Delete a draft with
+    `notes delete <id> --yes`; edit or publish it from the Drafts tab in the
+    Substack Notes composer.
+    """
+    try:
+        client = _make_client()
+        result = list_draft_notes(client, limit=limit)
+        if isinstance(result, dict) and "drafts" in result:
+            result = result["drafts"]
+        output_list(result, pretty=pretty, title="Note drafts")
     except (SubstackApiError, AuthError, ValueError) as exc:
         emit_error(str(exc), status_code=getattr(exc, "status_code", None), pretty=pretty)
     except Exception as exc:
