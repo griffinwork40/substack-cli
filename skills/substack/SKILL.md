@@ -79,7 +79,8 @@ enabled, because they are hard to reverse or immediately externally
 visible: `drafts delete`, `drafts publish`, `comments delete`,
 `subscribers remove`, `recommendations remove`, `tags delete`,
 `notes create` and `notes reply` (both publish immediately and cannot be
-edited), and `notes delete`.
+edited; `notes create --draft` is exempt because it saves without
+publishing, while `--schedule` still needs `--yes`), and `notes delete`.
 
 ### Verify your setup
 
@@ -156,8 +157,10 @@ SUBSTACK_ENABLE_WRITE=true substack comments delete 456 --yes --host A
 ### Notes
 
 Substack Notes are the micro-blog surface (comment-backed internally).
-Full CRUD **except update** — the API has no note-edit endpoint, so notes
-publish immediately with no draft/undo; the only "edit" is delete + recreate.
+Published notes cannot be edited (only deleted + recreated). To review
+before anything goes public, use `--draft` (saved privately to the Drafts tab
+of the Substack Notes composer) or `--schedule` (a draft that auto-publishes
+at the given time). Edit or publish drafts from that Drafts tab.
 
 ```bash
 substack notes list                                 # your personalized Notes home feed
@@ -168,6 +171,11 @@ substack notes get c-98765                           # single note (accepts 9876
 SUBSTACK_ENABLE_WRITE=true substack notes create "Shipping Notes support today. **Big.**" --yes
 SUBSTACK_ENABLE_WRITE=true substack notes create --body-json ./note.json --yes    # rich ProseMirror body
 SUBSTACK_ENABLE_WRITE=true substack notes create "Chart of the day" --image ./chart.png --yes   # attach an image (repeat --image for several)
+# draft: saved to Notes Drafts, NOT published (no --yes needed)
+SUBSTACK_ENABLE_WRITE=true substack notes create "Chart of the day" --image ./chart.png --draft
+# schedule: draft that auto-publishes at the time (local time, or ...Z for UTC) -> requires --yes
+SUBSTACK_ENABLE_WRITE=true substack notes create "Morning take" --schedule 2026-10-12T08:30 --yes
+substack notes drafts                               # list saved + scheduled drafts (delete with notes delete <id> --yes)
 SUBSTACK_ENABLE_WRITE=true substack notes create "Subscribers only" --reply-min-role paid_subscriber --yes
 # reply: threads a reply under a parent note (accepts 98765 or c-98765); also immediate + uneditable -> requires --yes
 SUBSTACK_ENABLE_WRITE=true substack notes reply 98765 "Great point — totally agree." --yes

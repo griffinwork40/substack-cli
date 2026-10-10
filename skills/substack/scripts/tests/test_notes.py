@@ -15,11 +15,13 @@ from substack_cli.notes import (
     _load_body_json,
     _make_client,
     _normalize_comment_id,
+    _parse_schedule,
     _text_to_note_doc,
     create_note,
     create_note_image_attachment,
     delete_note,
     get_note,
+    list_draft_notes,
     list_notes,
     reply_to_note,
 )
@@ -302,8 +304,8 @@ def test_list_notes_mine_resolves_self_then_profile_feed(
 # ---------------------------------------------------------------------------
 
 @respx.mock
-def test_get_note_hits_reader_feed_entity_key(fake_cookies, fake_publication_url):
-    route = respx.get(f"{SUBSTACK_COM}/api/v1/reader/feed/c-12345").mock(
+def test_get_note_hits_reader_comment_endpoint(fake_cookies, fake_publication_url):
+    route = respx.get(f"{SUBSTACK_COM}/api/v1/reader/comment/12345").mock(
         return_value=httpx.Response(200, json={"item": {"id": 12345}})
     )
     client = SubstackClient(cookies=fake_cookies, publication_url=fake_publication_url)
@@ -571,3 +573,150 @@ def test_cli_create_missing_image_errors_without_publishing(
     )
     assert result.exit_code != 0
     assert "Image file not found" in result.output
+
+
+
+# ---------------------------------------------------------------------------
+# Drafts + scheduling (--draft / --schedule / notes drafts)
+# ---------------------------------------------------------------------------
+
+from datetime import datetime, timezone  # noqa: E402
+
+FIXED_NOW = datetime(2026, 10, 10, 12, 0, tzinfo=timezone.utc)
+
+
+def test_parse_schedule_utc_z_suffix():
+    assert _parse_schedule("2026-10-12T13:00Z", now=FIXED_NOW) == "2026-10-12T13:00:00.000Z"
+
+
+def test_parse_schedule_explicit_offset_converts_to_utc():
+    assert (
+        _parse_schedule("2026-10-12T09:00-04:00", now=FIXED_NOW)
+        == "2026-10-12T13:00:00.000Z"
+    )
+
+
+def test_parse_schedule_naive_uses_local_timezone():
+    naive = datetime(2026, 10, 12, 9, 0)
+    expected = naive.astimezone().astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    assert _parse_schedule("2026-10-12 09:00", now=FIXED_NOW) == expected
+
+
+def test_parse_schedule_rejects_past_and_garbage():
+    with pytest.raises(ValueError, match="not in the future"):
+        _parse_schedule("2026-10-09T09:00Z", now=FIXED_NOW)
+    with pytest.raises(ValueError, match="Invalid --schedule"):
+        _parse_schedule("next tuesday", now=FIXED_NOW)
+
+
+@respx.mock
+def test_create_note_draft_posts_to_comment_draft_not_feed(
+    fake_cookies, fake_publication_url, isolated_config, write_enabled_env
+):
+    draft = respx.post(f"{SUBSTACK_COM}/api/v1/comment/draft").mock(
+        return_value=httpx.Response(200, json={"id": 5, "status": "draft"})
+    )
+    feed = respx.post(f"{SUBSTACK_COM}/api/v1/comment/feed").mock(
+        return_value=httpx.Response(200, json={"id": 1})
+    )
+    client = SubstackClient(cookies=fake_cookies, publication_url=fake_publication_url)
+    assert create_note(client, text="Later", draft=True) == {"id": 5, "status": "draft"}
+    assert not feed.called
+    sent = json.loads(draft.calls[0].request.content)
+    assert sent["bodyJson"]["type"] == "doc"
+    assert sent["tabId"] == "for-you" and sent["surface"] == "feed"
+    assert "trigger_at" not in sent
+
+
+@respx.mock
+def test_create_note_scheduled_sends_trigger_at_and_images(
+    fake_cookies, fake_publication_url, isolated_config, write_enabled_env, note_image
+):
+    _mock_image_routes(("att-1",))
+    draft = respx.post(f"{SUBSTACK_COM}/api/v1/comment/draft").mock(
+        return_value=httpx.Response(200, json={"id": 6})
+    )
+    client = SubstackClient(cookies=fake_cookies, publication_url=fake_publication_url)
+    create_note(
+        client, text="Tomorrow", image_paths=[note_image],
+        trigger_at="2026-10-12T13:00:00.000Z",
+    )
+    sent = json.loads(draft.calls[0].request.content)
+    assert sent["trigger_at"] == "2026-10-12T13:00:00.000Z"
+    assert sent["attachmentIds"] == ["att-1"]
+
+
+@respx.mock
+def test_list_draft_notes_hits_feed_drafts(fake_cookies, fake_publication_url):
+    route = respx.get(f"{SUBSTACK_COM}/api/v1/feed/drafts").mock(
+        return_value=httpx.Response(200, json={"drafts": [{"id": 1}], "hasMore": False})
+    )
+    client = SubstackClient(cookies=fake_cookies, publication_url=fake_publication_url)
+    assert list_draft_notes(client, limit=5)["drafts"] == [{"id": 1}]
+    assert route.calls[0].request.url.params["limit"] == "5"
+
+
+@respx.mock
+def test_cli_create_draft_does_not_need_yes(
+    isolated_config, authed_env, write_enabled_env, cli_runner
+):
+    respx.post(f"{SUBSTACK_COM}/api/v1/comment/draft").mock(
+        return_value=httpx.Response(200, json={"id": 42, "status": "draft"})
+    )
+    feed = respx.post(f"{SUBSTACK_COM}/api/v1/comment/feed").mock(
+        return_value=httpx.Response(200, json={"id": 1})
+    )
+    result = cli_runner.invoke(notes_app, ["create", "Save me", "--draft"])
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout.strip())["id"] == 42
+    assert not feed.called
+
+
+def test_cli_create_draft_still_requires_write_gate(isolated_config, authed_env, cli_runner):
+    result = cli_runner.invoke(notes_app, ["create", "Save me", "--draft"])
+    assert result.exit_code != 0
+    assert "SUBSTACK_ENABLE_WRITE" in result.output
+
+
+def test_cli_schedule_requires_yes(
+    isolated_config, authed_env, write_enabled_env, cli_runner
+):
+    result = cli_runner.invoke(
+        notes_app, ["create", "x", "--schedule", "2099-01-01T09:00Z"]
+    )
+    assert result.exit_code != 0
+    assert "--yes" in result.output
+
+
+def test_cli_schedule_rejects_past_time(
+    isolated_config, authed_env, write_enabled_env, cli_runner
+):
+    result = cli_runner.invoke(
+        notes_app, ["create", "x", "--schedule", "2001-01-01T09:00Z", "--yes"]
+    )
+    assert result.exit_code != 0
+    assert "not in the future" in result.output
+
+
+@respx.mock
+def test_cli_schedule_happy_path(
+    isolated_config, authed_env, write_enabled_env, cli_runner
+):
+    route = respx.post(f"{SUBSTACK_COM}/api/v1/comment/draft").mock(
+        return_value=httpx.Response(200, json={"id": 7})
+    )
+    result = cli_runner.invoke(
+        notes_app, ["create", "x", "--schedule", "2099-01-01T09:00Z", "--yes"]
+    )
+    assert result.exit_code == 0, result.output
+    assert json.loads(route.calls[0].request.content)["trigger_at"] == "2099-01-01T09:00:00.000Z"
+
+
+@respx.mock
+def test_cli_drafts_lists_unwrapped(isolated_config, authed_env, cli_runner):
+    respx.get(f"{SUBSTACK_COM}/api/v1/feed/drafts").mock(
+        return_value=httpx.Response(200, json={"drafts": [{"id": 1}, {"id": 2}]})
+    )
+    result = cli_runner.invoke(notes_app, ["drafts"])
+    assert result.exit_code == 0, result.output
+    assert [d["id"] for d in json.loads(result.stdout.strip())] == [1, 2]
