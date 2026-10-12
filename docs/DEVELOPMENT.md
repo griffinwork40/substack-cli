@@ -95,7 +95,7 @@ from substack_cli.app import app
 - **No real config file**: `isolated_config` fixture redirects `CONFIG_PATH` to tmp
 - **No real env vars**: `isolated_config` clears `SUBSTACK_*` env vars
 - **No real sleep**: `no_sleep` fixture patches `time.sleep` for retry/throttle tests
-- **234 test cases** across 22 test files (including integration/e2e tests)
+- **420 test cases** across 24 test files (including integration/e2e tests)
 
 ## Deferred / Out of Scope for v1
 
