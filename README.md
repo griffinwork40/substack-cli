@@ -89,7 +89,7 @@ substack-cli/
 ```bash
 cd skills/substack/scripts
 pip install -r requirements-dev.txt
-pytest -q          # 420 tests, all HTTP mocked — no real network calls
+pytest -q          # 439 tests, all HTTP mocked — no real network calls
 ```
 
 Architecture, auth model, two-host routing, and a guide to adding new endpoints live in [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md). The API surface is mapped in [`skills/substack/references/substack-api.md`](skills/substack/references/substack-api.md).
