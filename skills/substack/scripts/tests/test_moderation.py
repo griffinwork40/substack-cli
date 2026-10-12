@@ -547,9 +547,9 @@ def test_build_report_body_parses_report_context_json():
     assert body["report_context"] == {"k": 1}
 
 
-def test_build_report_body_passes_bad_json_as_string():
-    body = build_report_body("spam", "", True, None, "not-json")
-    assert body["report_context"] == "not-json"
+def test_build_report_body_raises_on_bad_json():
+    with pytest.raises(ValueError, match="not valid JSON"):
+        build_report_body("spam", "", True, None, "not-json")
 
 
 def test_build_profile_report_body_has_surface():

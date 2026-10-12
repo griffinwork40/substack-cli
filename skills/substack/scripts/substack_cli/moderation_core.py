@@ -58,8 +58,10 @@ def build_report_body(
     if report_context is not None:
         try:
             body["report_context"] = json.loads(report_context)
-        except json.JSONDecodeError:
-            body["report_context"] = report_context
+        except json.JSONDecodeError as exc:
+            raise ValueError(
+                f"--report-context is not valid JSON: {exc}"
+            ) from exc
     return body
 
 
@@ -79,8 +81,10 @@ def build_profile_report_body(
     if report_context is not None:
         try:
             body["report_context"] = json.loads(report_context)
-        except json.JSONDecodeError:
-            body["report_context"] = report_context
+        except json.JSONDecodeError as exc:
+            raise ValueError(
+                f"--report-context is not valid JSON: {exc}"
+            ) from exc
     return body
 
 
@@ -109,6 +113,11 @@ def report_comment(
     """Report a comment via POST /api/v1/comment/{comment_id}/report."""
     if not is_write_enabled():
         raise ValueError("Write operations require SUBSTACK_ENABLE_WRITE=true")
+    if category not in VALID_CATEGORIES:
+        raise ValueError(
+            f"Invalid category {category!r}. "
+            f"Valid values: {sorted(VALID_CATEGORIES)}"
+        )
     body = build_report_body(
         category, details, reported_to_substack, publication_id, report_context
     )
@@ -126,6 +135,11 @@ def report_user_profile(
     """Report a user profile via POST https://substack.com/api/v1/users/{user_id}/profile/report."""
     if not is_write_enabled():
         raise ValueError("Write operations require SUBSTACK_ENABLE_WRITE=true")
+    if category not in VALID_CATEGORIES:
+        raise ValueError(
+            f"Invalid category {category!r}. "
+            f"Valid values: {sorted(VALID_CATEGORIES)}"
+        )
     body = build_profile_report_body(
         category, details, reported_to_substack, report_context
     )

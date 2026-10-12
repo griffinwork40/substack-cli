@@ -117,14 +117,14 @@ def comments_report_cmd(
     pretty: bool = typer.Option(False, "--pretty"),
 ):
     """Report a comment by ID. Dry-run by default (prints request without sending)."""
+    if not is_write_enabled():
+        emit_error("Write operations require SUBSTACK_ENABLE_WRITE=true", pretty=pretty)
     if category not in VALID_CATEGORIES:
         emit_error(
             f"Invalid --category {category!r}. "
             f"Valid values: {sorted(VALID_CATEGORIES)}",
             pretty=pretty,
         )
-    if not is_write_enabled():
-        emit_error("Write operations require SUBSTACK_ENABLE_WRITE=true", pretty=pretty)
 
     try:
         body = build_report_body(
@@ -191,14 +191,14 @@ def comments_report_user_cmd(
     pretty: bool = typer.Option(False, "--pretty"),
 ):
     """Report a user's profile. Dry-run by default."""
+    if not is_write_enabled():
+        emit_error("Write operations require SUBSTACK_ENABLE_WRITE=true", pretty=pretty)
     if category not in VALID_CATEGORIES:
         emit_error(
             f"Invalid --category {category!r}. "
             f"Valid values: {sorted(VALID_CATEGORIES)}",
             pretty=pretty,
         )
-    if not is_write_enabled():
-        emit_error("Write operations require SUBSTACK_ENABLE_WRITE=true", pretty=pretty)
 
     try:
         body = build_profile_report_body(category, details, to_substack, report_context)
@@ -257,6 +257,8 @@ def comments_ban_cmd(
     pretty: bool = typer.Option(False, "--pretty"),
 ):
     """Ban a commenter by comment ID. Dry-run by default."""
+    if not is_write_enabled():
+        emit_error("Write operations require SUBSTACK_ENABLE_WRITE=true", pretty=pretty)
     if visibility not in VALID_VISIBILITIES:
         emit_error(
             f"Invalid --visibility {visibility!r}. "
@@ -268,8 +270,6 @@ def comments_ban_cmd(
             f"Invalid --expiry {expiry!r}. Must be one of: {sorted(VALID_EXPIRIES)}",
             pretty=pretty,
         )
-    if not is_write_enabled():
-        emit_error("Write operations require SUBSTACK_ENABLE_WRITE=true", pretty=pretty)
 
     try:
         body = build_ban_body(user_id, expiry, visibility)
