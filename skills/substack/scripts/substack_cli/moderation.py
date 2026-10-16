@@ -9,7 +9,7 @@ from typing import Optional
 
 import typer
 
-from substack_cli.app import app, comments_app
+from substack_cli.app import app, comments_app, moderation_app
 from substack_cli.auth import (
     AuthError,
     is_write_enabled,
@@ -37,17 +37,7 @@ from substack_cli.moderation_core import (
     report_comment,
     report_user_profile,
 )
-
-# ---------------------------------------------------------------------------
-# New top-level sub-app: moderation
-# ---------------------------------------------------------------------------
-
-moderation_app = typer.Typer(
-    help="Comment moderation helpers: report categories, delete reasons.",
-    no_args_is_help=True,
-)
-app.add_typer(moderation_app, name="moderation")
-
+import substack_cli.moderation_hidden_cmd  # noqa: F401,E402 — registers `moderation hidden`
 
 # ---------------------------------------------------------------------------
 # Helper: build client
