@@ -25,6 +25,7 @@ from substack_cli import manage as _manage    # noqa: E402, F401
 from substack_cli import notes as _notes      # noqa: E402, F401
 from substack_cli import chat as _chat        # noqa: E402, F401
 from substack_cli import moderation as _moderation  # noqa: E402, F401
+from substack_cli import users as _users          # noqa: E402, F401
 
 from substack_cli.app import main  # noqa: E402
 

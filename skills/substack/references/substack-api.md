@@ -50,6 +50,9 @@ research (all ~55 discovered endpoints), see
 | `comments bans` | GET | `/api/v1/user/{id}/bans` | P | Yes | Bundle-derived, not live-verified | Read-only. |
 | `moderation report-categories` | GET | `/api/v1/reporting/flows` | A | Yes | Bundle-derived, not live-verified | Read-only. Uses bare substack.com host (Host A). Returns the full reportCategory tree. |
 | `moderation delete-reasons` | GET | `/api/v1/comment/moderation/delete_reasons` | P | Yes | Bundle-derived, not live-verified | Read-only. |
+| `users block` | POST | `/api/v1/user/{user_id}/block` | A | Yes | **Endpoint unverified — operator live-test required (#27)** | Dry-run by default; requires `SUBSTACK_ENABLE_WRITE`. Body: `{user_id}`. Uses bare substack.com host (Host A). Path isolated in `user_blocks._BLOCK_PATH`. |
+| `users unblock` | DELETE | `/api/v1/user/{user_id}/block` | A | Yes | **Endpoint unverified — operator live-test required (#27)** | Dry-run by default; requires `SUBSTACK_ENABLE_WRITE`. Same path as block, DELETE verb. |
+| `users blocks` | GET | `/api/v1/user/blocks` | A | Yes | **Endpoint unverified — operator live-test required (#27)** | Read-only. Returns authenticated user's block list. Path isolated in `user_blocks._BLOCKS_LIST_PATH`. |
 | `subscribers add` | POST | `/api/v1/subscriber/add` | P | Yes | Single source | Body: `{"email": "...", "name": "..."}` |
 | `subscribers remove` | DELETE | `/api/v1/subscriber/{id}` | P | Yes | Single source | — |
 | `recommendations add` | PUT | `/api/v1/recommendations` | P | Yes | Single source | **Browser-vs-curl gap**: may 403 even with valid cookies |
