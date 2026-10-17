@@ -13,6 +13,8 @@ import json
 
 import respx
 
+import substack_cli.moderation  # noqa: F401 — register commands (import-order safe at module level)
+
 from substack_cli.app import comments_app
 from substack_cli.client import SUBSTACK_COM
 
@@ -25,7 +27,6 @@ def test_comments_ban_dry_run_zero_http_calls(
     isolated_config, authed_env, write_enabled_env, cli_runner
 ):
     """Dry-run for `comments ban` must issue ZERO HTTP requests."""
-    import substack_cli.moderation  # noqa: F401 — ensure CLI commands are registered
 
     with respx.mock(assert_all_called=False) as router:
         result = cli_runner.invoke(
@@ -40,7 +41,6 @@ def test_comments_ban_dry_run_body_contents(
     isolated_config, authed_env, write_enabled_env, cli_runner
 ):
     """Dry-run output for `comments ban` contains the correct body fields."""
-    import substack_cli.moderation  # noqa: F401
 
     with respx.mock(assert_all_called=False):
         result = cli_runner.invoke(
@@ -66,7 +66,6 @@ def test_comments_ban_dry_run_delete_all_zero_http(
     isolated_config, authed_env, write_enabled_env, cli_runner
 ):
     """Dry-run with delete_all_comments visibility also fires no HTTP."""
-    import substack_cli.moderation  # noqa: F401
 
     with respx.mock(assert_all_called=False) as router:
         result = cli_runner.invoke(
@@ -93,7 +92,6 @@ def test_comments_report_user_dry_run_zero_http_calls(
     isolated_config, authed_env, write_enabled_env, cli_runner
 ):
     """Dry-run for `comments report-user` must issue ZERO HTTP requests."""
-    import substack_cli.moderation  # noqa: F401
 
     with respx.mock(assert_all_called=False) as router:
         result = cli_runner.invoke(
@@ -108,7 +106,6 @@ def test_comments_report_user_dry_run_body_contents(
     isolated_config, authed_env, write_enabled_env, cli_runner
 ):
     """Dry-run output for `comments report-user` has correct body and URL."""
-    import substack_cli.moderation  # noqa: F401
 
     with respx.mock(assert_all_called=False):
         result = cli_runner.invoke(
@@ -134,7 +131,6 @@ def test_comments_report_user_dry_run_all_categories_zero_http(
     isolated_config, authed_env, write_enabled_env, cli_runner
 ):
     """Dry-run with 'other' category (a valid enum) fires no HTTP."""
-    import substack_cli.moderation  # noqa: F401
 
     with respx.mock(assert_all_called=False) as router:
         result = cli_runner.invoke(
@@ -158,7 +154,6 @@ def test_comments_report_user_blocked_without_write_gate(
     Uses a valid category ('spam') so the test is independent of whether enum
     validation or the write-gate check fires first (issue #19 ordering).
     """
-    import substack_cli.moderation  # noqa: F401
 
     result = cli_runner.invoke(
         comments_app,
@@ -171,7 +166,6 @@ def test_comments_report_user_write_gate_message(
     isolated_config, authed_env, cli_runner
 ):
     """Error output mentions SUBSTACK_ENABLE_WRITE when write gate fires."""
-    import substack_cli.moderation  # noqa: F401
 
     result = cli_runner.invoke(
         comments_app,
