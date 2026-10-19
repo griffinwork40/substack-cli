@@ -154,7 +154,7 @@ real, paying subscribers with no undo. None of that is implemented.
 ## Deferred / Out of Scope for v1
 
 - Substack Notes **editing** — Notes CRUD + replies are implemented (`notes create`/`reply`/`list`/`get`/`delete`), but there is **no edit/update endpoint for published notes** and no undo. The only "edit" is delete-then-recreate (which yields a new id). Draft/scheduled notes (`--draft`, `--schedule`) can be edited before publishing, via the web composer's Drafts tab.
-- Full Markdown→ProseMirror (lists, images-in-body, footnotes, paywall markers, embeds)
+- Markdown→ProseMirror converter (`markdown_doc.py`): supports paragraphs, headings (#/##/###), **bold**, *italic*, links, `---`/`***`/`___` horizontal rules, hard line breaks. Lists, images, footnotes, paywall markers, embeds remain unsupported (use `--body-json`).
 - **Chat writes** (send/reply/delete/react/lock/ban/settings) — reads only (`chat list`/`replies`/`sub-replies`/`unread`) are implemented; see the confidence caveat above.
 - **DMs** — no endpoints implemented at all (read or write).
 - Stripe/pledges

@@ -278,10 +278,34 @@ substack archive --limit 10 | jq '.[] | {title, canonical_url}'
 substack subscribers count --pretty
 
 # Full draft -> review -> publish loop
-substack drafts create --title "New Post" --body-markdown "$(cat post.md)" | jq -r '.id' > /tmp/draft_id
+substack drafts create --title "New Post" --body-markdown "$(cat post.md)" --append-markdown signature.md | jq -r '.id' > /tmp/draft_id
 SUBSTACK_ENABLE_WRITE=true substack drafts prepublish "$(cat /tmp/draft_id)"
 SUBSTACK_ENABLE_WRITE=true substack drafts publish "$(cat /tmp/draft_id)" --yes
 ```
+
+## Markdown Bodies
+
+**Markdown converter** (`--body-markdown`): supports paragraphs, `#`/`##`/`###` headings,
+`**bold**`, `*italic*`, `[text](url)` links, `---`/`***`/`___` horizontal rules, and
+hard line breaks (single newline within a paragraph). Lists, images, footnotes,
+paywall markers, and embeds are **not** supported — use `--body-json` with a full
+ProseMirror document for those. Use `--append-markdown` / `--prepend-markdown` on
+`drafts create` and `drafts update` to splice a Markdown snippet (or file path) onto
+the end or start of the body. `--append-markdown` / `--prepend-markdown` on
+`drafts update` requires `--body-markdown` or `--body-json` to be supplied simultaneously.
+
+Sign-off / signature example (`signature.md` holds `---`, a blank line, then
+`Thanks for reading,` and `Griffin` on consecutive lines, which render as a hard
+line break):
+
+```bash
+SUBSTACK_ENABLE_WRITE=true substack drafts create --title "New Post" \
+  --body-markdown "$(cat post.md)" --append-markdown signature.md
+```
+
+This puts the text in the post body, so it shows on the web as well as in the
+email. Substack's own email-only header/footer (Settings → Emails) is not yet
+supported because its API field names are unconfirmed.
 
 ## Known Limitations
 
