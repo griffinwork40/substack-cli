@@ -134,7 +134,7 @@ substack leaderboard 76739 --pretty                # numeric category id also ac
 ### Drafting & publishing
 
 ```bash
-substack drafts create --title "Dear Charlie #37" --body-markdown "$(cat draft.md)"
+SUBSTACK_ENABLE_WRITE=true substack drafts create --title "Dear Charlie #37" --body-markdown "$(cat draft.md)"
 substack drafts list --limit 10
 substack drafts get 123456
 substack drafts prepublish 123456                  # validation pass — run before publish
@@ -278,14 +278,15 @@ substack archive --limit 10 | jq '.[] | {title, canonical_url}'
 substack subscribers count --pretty
 
 # Full draft -> review -> publish loop
-substack drafts create --title "New Post" --body-markdown "$(cat post.md)" --append-markdown signature.md | jq -r '.id' > /tmp/draft_id
+SUBSTACK_ENABLE_WRITE=true substack drafts create --title "New Post" --body-markdown "$(cat post.md)" --append-markdown signature.md | jq -r '.id' > /tmp/draft_id
 SUBSTACK_ENABLE_WRITE=true substack drafts prepublish "$(cat /tmp/draft_id)"
 SUBSTACK_ENABLE_WRITE=true substack drafts publish "$(cat /tmp/draft_id)" --yes
 ```
 
 ## Markdown Bodies
 
-**Markdown converter** (`--body-markdown`): supports paragraphs, `#`/`##`/`###` headings,
+**Markdown converter** (`--body-markdown`): supports paragraphs, `#`/`##`/`###` ATX headings,
+CommonMark setext headings (`===` underline for h1, `---` underline for h2),
 `**bold**`, `*italic*`, `[text](url)` links, `---`/`***`/`___` horizontal rules, and
 hard line breaks (single newline within a paragraph). Lists, images, footnotes,
 paywall markers, and embeds are **not** supported — use `--body-json` with a full

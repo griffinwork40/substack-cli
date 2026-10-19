@@ -77,19 +77,24 @@ def create_draft(
     subtitle: Optional[str] = None,
     body_markdown: Optional[str] = None,
     body_json: Optional[str] = None,
+    draft_body: Optional[str] = None,
     byline_ids: Optional[list] = None,
 ) -> dict:
-    """Create a draft. draft_body MUST be a JSON string, never a nested dict."""
-    draft_body: Optional[str] = None
+    """Create a draft. body_markdown / body_json / draft_body are mutually exclusive.
+    draft_body is an already-serialised ProseMirror JSON string (CLI path)."""
+    if sum(x is not None for x in (body_markdown, body_json, draft_body)) > 1:
+        raise ValueError("body_markdown, body_json, and draft_body are mutually exclusive.")
+    _assembled: Optional[str] = draft_body
     if body_markdown is not None:
-        draft_body = doc_to_body_string(markdown_to_doc(body_markdown))
+        _assembled = doc_to_body_string(markdown_to_doc(body_markdown))
     elif body_json is not None:
         if os.path.isfile(body_json):
             with open(body_json) as f:
                 doc = json.load(f)
         else:
             doc = json.loads(body_json)
-        draft_body = doc_to_body_string(doc)
+        _assembled = doc_to_body_string(doc)
+    draft_body = _assembled
 
     if byline_ids is None:
         profile = client.get("/api/v1/user/profile/self", host="A")
@@ -200,7 +205,7 @@ def drafts_create_cmd(
             body_markdown=body_markdown, body_json=body_json,
             append_markdown=append_markdown, prepend_markdown=prepend_markdown,
         )
-        result = create_draft(_make_client(), title=title, subtitle=subtitle, body_json=draft_body)
+        result = create_draft(_make_client(), title=title, subtitle=subtitle, draft_body=draft_body)
         output(result, pretty=pretty)
     except (ValueError, NotImplementedError) as exc:
         emit_error(str(exc), pretty=pretty)

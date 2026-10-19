@@ -3,8 +3,9 @@
 Public API: parse_inline, markdown_to_doc, doc_to_body_string.
 
 Supports: blank-line-separated paragraphs, #/##/### headings, **bold**,
-*italic*, [text](url) links, --- / *** / ___ horizontal rules, and
-hard line breaks (single newline within a paragraph block). Raises
+*italic*, [text](url) links, --- / *** / ___ horizontal rules, hard line
+breaks (single newline within a paragraph block), and CommonMark setext
+headings (text underlined with === for h1 or --- for h2). Raises
 NotImplementedError for lists, images, and other unsupported constructs.
 """
 import json
@@ -62,12 +63,41 @@ def _is_hr(stripped: str) -> bool:
 # Block converter
 # ---------------------------------------------------------------------------
 
+
+# Setext heading underline patterns (CommonMark: 1+ chars, up to 3 leading
+# spaces, optional trailing whitespace)
+_SETEXT_H1_RE = re.compile(r"^ {0,3}=+[ \t]*$")
+_SETEXT_H2_RE = re.compile(r"^ {0,3}-+[ \t]*$")
+
+
+def _flush_para_as_heading(para_lines: list, level: int) -> dict:
+    """Build a heading node from accumulated paragraph lines.
+
+    Multiple pending lines are joined with a space (simpler than hard_break
+    inside a heading, and matches CommonMark rendering intent).
+    """
+    joined = " ".join(para_lines)
+    return {
+        "type": "heading",
+        "attrs": {"level": level},
+        "content": parse_inline(joined),
+    }
+
+
 def markdown_to_doc(markdown_text: str) -> dict:
     """Convert minimal Markdown to a ProseMirror document.
 
-    Supports: blank-line-separated paragraphs, #/##/### headings,
-    **bold**, *italic*, [text](url) links, --- / *** / ___ horizontal
+    Supports: blank-line-separated paragraphs, #/##/### ATX headings,
+    CommonMark setext headings (text underlined with === for h1 or --- for
+    h2), **bold**, *italic*, [text](url) links, --- / *** / ___ horizontal
     rules, and hard line breaks (single newline within a paragraph block).
+
+    Setext heading rule: when para_lines are pending (no intervening blank
+    line) and the current line is all = chars (level 1) or all - chars
+    (level 2, minimum 1 char per CommonMark), the pending lines become the
+    heading content.  A standalone --- after a blank line (or at document
+    start) remains a horizontal rule; the setext rule only fires when there
+    are pending paragraph lines.
 
     Raises NotImplementedError with a --body-json hint for lists, images,
     footnotes, paywall markers, embeds, and other unsupported constructs.
@@ -95,13 +125,26 @@ def markdown_to_doc(markdown_text: str) -> dict:
             flush_para()
             continue
 
+        # Setext heading underline — only when para_lines are pending
+        if para_lines:
+            if _SETEXT_H1_RE.match(line):
+                content.append(_flush_para_as_heading(para_lines, level=1))
+                para_lines.clear()
+                continue
+            if _SETEXT_H2_RE.match(line):
+                content.append(_flush_para_as_heading(para_lines, level=2))
+                para_lines.clear()
+                continue
+
         # Horizontal rule — flush paragraph, emit rule node
+        # (only reached when para_lines is empty, because setext check above
+        #  intercepts --- when para_lines are pending)
         if _is_hr(stripped):
             flush_para()
             content.append({"type": "horizontal_rule"})
             continue
 
-        # Heading detection
+        # ATX heading detection
         heading_match = re.match(r"^(#{1,3})\s+(.+)$", stripped)
         if heading_match:
             flush_para()

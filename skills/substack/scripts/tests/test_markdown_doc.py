@@ -62,11 +62,14 @@ def test_horizontal_rule_mid_document():
     assert types == ["paragraph", "horizontal_rule", "paragraph"]
 
 
-def test_horizontal_rule_between_paragraphs_no_blank_lines():
-    # hr flushes an in-progress paragraph even without a blank line before it
+def test_setext_h2_then_paragraph_no_blank_lines():
+    # CommonMark: 'Before\n---' is a setext h2, not a paragraph + HR.
+    # 'After' on the next line starts a new paragraph.
     doc = markdown_to_doc("Before\n---\nAfter")
     types = [n["type"] for n in doc["content"]]
-    assert types == ["paragraph", "horizontal_rule", "paragraph"]
+    assert types == ["heading", "paragraph"]
+    assert doc["content"][0]["attrs"]["level"] == 2
+    assert doc["content"][0]["content"][0]["text"] == "Before"
 
 
 def test_horizontal_rule_regression_body_text_and_signature():
@@ -194,6 +197,81 @@ def test_two_paragraphs_separated_by_blank_line():
 
 
 # ---------------------------------------------------------------------------
+# Setext headings (CommonMark)
+# ---------------------------------------------------------------------------
+
+def test_setext_h1_equals():
+    """Title\\n=== → level-1 heading."""
+    doc = markdown_to_doc("Title\n===")
+    assert len(doc["content"]) == 1
+    h = doc["content"][0]
+    assert h["type"] == "heading"
+    assert h["attrs"]["level"] == 1
+    assert h["content"][0]["text"] == "Title"
+
+
+def test_setext_h2_dashes():
+    """Title\\n--- → level-2 heading (not horizontal_rule)."""
+    doc = markdown_to_doc("Title\n---")
+    assert len(doc["content"]) == 1
+    h = doc["content"][0]
+    assert h["type"] == "heading"
+    assert h["attrs"]["level"] == 2
+    assert h["content"][0]["text"] == "Title"
+
+
+def test_setext_h2_two_dashes():
+    """Title\\n-- → level-2 heading per CommonMark (1+ dashes sufficient)."""
+    doc = markdown_to_doc("Title\n--")
+    assert len(doc["content"]) == 1
+    h = doc["content"][0]
+    assert h["type"] == "heading"
+    assert h["attrs"]["level"] == 2
+
+
+def test_setext_hr_after_blank_line():
+    """Body\\n\\n---\\n\\nThanks → paragraph, horizontal_rule, paragraph (not setext)."""
+    doc = markdown_to_doc("Body\n\n---\n\nThanks")
+    types = [n["type"] for n in doc["content"]]
+    assert types == ["paragraph", "horizontal_rule", "paragraph"]
+
+
+def test_setext_star_hr_after_text():
+    """a\\n*** → horizontal_rule (*** is never setext; setext only for = and -)."""
+    doc = markdown_to_doc("a\n***")
+    types = [n["type"] for n in doc["content"]]
+    assert types == ["paragraph", "horizontal_rule"]
+
+
+def test_setext_underscore_hr_after_text():
+    """a\\n___ → horizontal_rule (___ is never setext)."""
+    doc = markdown_to_doc("a\n___")
+    types = [n["type"] for n in doc["content"]]
+    assert types == ["paragraph", "horizontal_rule"]
+
+
+def test_setext_pr_signature_example():
+    """Full PR example: Body *text* here\\n\\n---\\n\\nThanks,\\n**Griffin**."""
+    doc = markdown_to_doc("Body *text* here\n\n---\n\nThanks,\n**Griffin**")
+    types = [n["type"] for n in doc["content"]]
+    assert types == ["paragraph", "horizontal_rule", "paragraph"]
+    # Last paragraph has hard_break between Thanks, and **Griffin**
+    last = doc["content"][2]
+    node_types = [n["type"] for n in last["content"]]
+    assert "hard_break" in node_types
+
+
+def test_setext_heading_content_with_inline():
+    """Inline marks inside a setext heading are parsed."""
+    doc = markdown_to_doc("**Bold** title\n===")
+    h = doc["content"][0]
+    assert h["type"] == "heading"
+    assert h["attrs"]["level"] == 1
+    bold_node = h["content"][0]
+    assert any(m["type"] == "strong" for m in bold_node.get("marks", []))
+
+
+# ---------------------------------------------------------------------------
 # doc_to_body_string
 # ---------------------------------------------------------------------------
 
@@ -203,3 +281,11 @@ def test_doc_to_body_string_returns_json_string():
     result = doc_to_body_string(doc)
     assert isinstance(result, str)
     assert json.loads(result) == doc
+
+
+def test_setext_underline_trailing_whitespace():
+    """CommonMark allows trailing spaces after a setext underline."""
+    for underline, level in (("--- ", 2), ("===\t", 1)):
+        doc = markdown_to_doc(f"Title\n{underline}")
+        assert [n["type"] for n in doc["content"]] == ["heading"]
+        assert doc["content"][0]["attrs"]["level"] == level

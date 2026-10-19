@@ -196,8 +196,52 @@ def test_drafts_update_snippet_without_body_errors(
         "--append-markdown", "sig",
     ])
 
-    # Should emit error to stderr and exit 1 (or have error in output)
-    assert result.exit_code != 0 or "append-markdown" in (result.output or "")
+    # write gate is open (write_enabled_env) and auth is set (authed_env), so
+    # the only guard that can fire is the assemble_body() ValueError for
+    # append/prepend without a body on update.  emit_error() writes JSON to
+    # stderr; CliRunner mixes_stderr by default so it appears in result.output.
+    assert result.exit_code == 1
+    assert "append-markdown" in (result.output or "")
+
+
+@respx.mock
+def test_drafts_create_assembled_body_passes_through_unchanged(
+    isolated_config, authed_env, write_enabled_env, cli_runner, fake_cookies, fake_publication_url
+):
+    """CLI path: assemble_body() result is forwarded via draft_body=, not re-parsed.
+
+    Verifies item 1 fix: drafts_create_cmd calls create_draft(..., draft_body=...)
+    so the already-serialised string is never run through json.loads again.
+    """
+    from substack_cli import config, read, publish, manage
+    from substack_cli.app import app
+
+    respx.get(f"{SUBSTACK_COM}/api/v1/user/profile/self").mock(
+        return_value=httpx.Response(200, json={"id": 1, "publicationUserId": 2})
+    )
+    route = respx.post(f"{fake_publication_url}/api/v1/drafts").mock(
+        return_value=httpx.Response(200, json={"id": 42})
+    )
+
+    result = cli_runner.invoke(app, [
+        "drafts", "create",
+        "--title", "Passthrough Test",
+        "--body-markdown", "Hello",
+        "--append-markdown", "---\nSigned",
+    ])
+
+    assert result.exit_code == 0, result.output
+    assert route.called
+    sent = json.loads(route.calls[0].request.content)
+    # draft_body must be a valid JSON string (not double-encoded)
+    body_str = sent["draft_body"]
+    assert isinstance(body_str, str)
+    doc = json.loads(body_str)
+    assert doc["type"] == "doc"
+    types = [n["type"] for n in doc["content"]]
+    assert types[0] == "paragraph"        # Hello
+    assert types[1] == "horizontal_rule"  # ---
+    assert types[2] == "paragraph"        # Signed
 
 
 @respx.mock
