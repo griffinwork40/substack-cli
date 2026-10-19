@@ -27,7 +27,9 @@ ln -s "$(pwd)/substack" /usr/local/bin/substack
 | `auth.py` | Credential resolution (env → config), headers, redaction, hints | `config.py` |
 | `client.py` | `SubstackClient` (HTTP, retries, throttle, errors), `emit_error()`, `output()` | `auth.py`, `models.py` |
 | `read.py` | All GET/read commands (archive, posts, feed, comments, search, stats, analytics, categories/sections, category leaderboard) | `client.py`, `app.py` (registers commands) |
-| `publish.py` | Draft CRUD, publish/schedule lifecycle, image upload, MD→ProseMirror | `client.py`, `app.py` (registers commands) |
+| `publish.py` | Draft CRUD, publish/schedule lifecycle, image upload; re-exports converter aliases | `client.py`, `app.py`, `markdown_doc.py`, `body_assembly.py` |
+| `markdown_doc.py` | Markdown → ProseMirror converter (`parse_inline`, `markdown_to_doc`, `doc_to_body_string`) | nothing |
+| `body_assembly.py` | `assemble_body()` — splices `--append-markdown` / `--prepend-markdown` snippets | `markdown_doc.py` |
 | `manage.py` | Comments, reactions, subscribers, recommendations, tags, pub settings | `client.py`, `app.py` (registers commands) |
 | `notes.py` | Substack Notes CRUD (create/list/get/delete) + note bodyJson builder | `client.py`, `app.py`, `publish.py` (reuses `_parse_inline`) |
 | `app.py` | Root Typer app, subapp wiring, `config test` command, `main()` error wrapper | all (composition root) |
@@ -95,7 +97,7 @@ from substack_cli.app import app
 - **No real config file**: `isolated_config` fixture redirects `CONFIG_PATH` to tmp
 - **No real env vars**: `isolated_config` clears `SUBSTACK_*` env vars
 - **No real sleep**: `no_sleep` fixture patches `time.sleep` for retry/throttle tests
-- **439 test cases** across 31 test files (including integration/e2e tests)
+- **658 test cases** across 36 test files (including integration/e2e tests)
 
 ## Deferred / Out of Scope for v1
 
