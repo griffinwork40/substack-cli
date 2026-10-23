@@ -1,8 +1,18 @@
-"""Substack CLI — moderation helpers: shared client factory and dry-run output.
+"""Substack CLI — moderation helpers: shared client factory, dry-run output,
+and read-only moderation query commands.
 
 Extracted from moderation.py to keep that module within the 350-LOC limit.
 Import only from moderation.py and tests — not from moderation_core.py (which
 must remain command-free and import-cycle-free).
+
+Note: this module also registers three read-only Typer commands
+(``comments bans``, ``moderation report-categories``,
+``moderation delete-reasons``) that were moved here during the #34 merge to
+keep moderation.py under the LOC limit.  The imports for those commands
+(app, typer, AuthError, etc.) appear below the helper functions rather than at
+the top of the file; this is intentional — the command-registration block
+depends on ``moderation_app`` being defined in this same module, and moving
+the imports to the top would not change the registration order.
 """
 from __future__ import annotations
 

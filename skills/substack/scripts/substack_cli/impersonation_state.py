@@ -85,16 +85,29 @@ def _dry_run_report_user(user_id: int, reason_str: str) -> dict:
 # Comment tree walker
 # ---------------------------------------------------------------------------
 
-def _walk_comments(comments: list, depth: int = 0) -> list[dict]:
-    """Recursively flatten a comment tree (comments + their children)."""
-    flat = []
-    for c in comments:
+def _walk_comments(comments: list) -> list[dict]:
+    """Iteratively flatten a comment tree (comments + their children).
+
+    Uses an explicit stack rather than recursion so arbitrarily deep trees
+    (e.g. adversarially nested comment chains) never hit Python's recursion
+    limit.  Output order is identical to the former recursive implementation:
+    each node appears before its children (pre-order, depth-first).
+    """
+    flat: list[dict] = []
+    # Stack entries are (node, index_into_children_already_emitted).
+    # We push (comment, children_list) pairs; process each comment first,
+    # then push its children onto the stack in reverse order so the leftmost
+    # child is processed next (preserving sibling order).
+    stack: list[dict] = list(reversed(comments))
+    while stack:
+        c = stack.pop()
         if not isinstance(c, dict):
             continue
         flat.append(c)
         children = c.get("children") or c.get("comments") or []
         if children:
-            flat.extend(_walk_comments(children, depth + 1))
+            # Reverse so that the first child ends up on top of the stack.
+            stack.extend(reversed(children))
     return flat
 
 

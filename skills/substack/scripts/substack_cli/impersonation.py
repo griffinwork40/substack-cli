@@ -198,8 +198,18 @@ def run_scan(
             continue
         item = item_wrapper.get("item") or item_wrapper
         note_comment = item.get("comment") or {}
-        note_id = note_comment.get("id") or item_wrapper.get("entity_key", "").removeprefix("c-")
-        if not note_id:
+        _raw_entity_key = item_wrapper.get("entity_key", "")
+        if note_comment.get("id"):
+            note_id = note_comment["id"]
+        elif _raw_entity_key.startswith("c-"):
+            note_id = _raw_entity_key[2:]  # strip the "c-" prefix
+        else:
+            if _raw_entity_key:
+                import sys as _sys
+                _sys.stderr.write(
+                    f"[impersonation] Warning: unexpected entity_key format"
+                    f" {_raw_entity_key!r} — skipping note item\n"
+                )
             continue
 
         # Replies are in item.children
