@@ -1,30 +1,7 @@
 ---
 name: substack
 allowed-tools: Bash, Read, Write, Edit
-description: >
-  CLI wrapper for Substack's unofficial private API — read publication
-  content (archive, posts, RSS feed, comments, search, analytics) and
-  manage a publication you own (create/edit/publish/schedule drafts,
-  moderate comments, manage subscribers, recommendations, and tags), and
-  post/reply-to/list/delete Substack Notes (Substack's micro-blog surface;
-  note that the API has no note-editing endpoint — notes publish immediately),
-  and read (READ-ONLY) Substack Chat — list threads, list replies/sub-replies,
-  and check unread counts; Chat endpoints are community-reported and never
-  live-verified, and there is no write support (no send/reply/delete).
-  Triggers on requests to check a Substack newsletter's archive or posts,
-  pull post analytics or subscriber counts, draft or publish a Substack
-  post, schedule a newsletter, reply to or moderate Substack comments, post,
-  reply to, or delete a Substack Note, check Substack Chat threads/replies/
-  unread counts, or manage a Substack publication programmatically.
-  Examples: "what did I publish on Substack this month",
-  "draft a new Substack post", "how many subscribers does my newsletter
-  have", "schedule my Substack post for Friday", "reply to comments on my
-  latest post", "post a Substack Note", "reply to that Substack note",
-  "delete my last note", "list my Substack Chat threads", "how many unread
-  Substack chats do I have". Requires
-  SUBSTACK_COOKIES_STRING (session cookie) for any authenticated
-  operation; read-only public endpoints (archive, post, feed) work without
-  auth. Write operations additionally require SUBSTACK_ENABLE_WRITE=true.
+description: "CLI wrapper for Substack's unofficial private API — read publication content (archive, posts, RSS feed, comments, search, analytics) and manage a publication you own (create/edit/publish/schedule drafts, moderate comments, manage subscribers, recommendations, and tags), and post/reply-to/list/delete Substack Notes (Substack's micro-blog surface; note that the API has no note-editing endpoint — notes publish immediately), and read (READ-ONLY) Substack Chat — list threads, list replies/sub-replies, and check unread counts; Chat endpoints are community-reported and never live-verified, and there is no write support (no send/reply/delete). Triggers on requests to check a Substack newsletter's archive or posts, pull post analytics or subscriber counts, draft or publish a Substack post, schedule a newsletter, reply to or moderate Substack comments, post, reply to, or delete a Substack Note, check Substack Chat threads/replies/unread counts, or manage a Substack publication programmatically. Examples: what did I publish on Substack this month, draft a new Substack post, how many subscribers does my newsletter have, schedule my Substack post for Friday, reply to comments on my latest post, post a Substack Note, reply to that Substack note, delete my last note, list my Substack Chat threads, how many unread Substack chats do I have. Requires SUBSTACK_COOKIES_STRING (session cookie) for any authenticated operation; read-only public endpoints (archive, post, feed) work without auth. Write operations additionally require SUBSTACK_ENABLE_WRITE=true."
 ---
 
 # substack — Substack CLI (unofficial API)
