@@ -144,6 +144,7 @@ def test_report_user_profile_core_accepts_valid_category(monkeypatch, cat):
     client.post.return_value = {"ok": True}
     result = report_user_profile(client, 1, cat, "", True, None)
     assert result == {"ok": True}
+    client.post.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
