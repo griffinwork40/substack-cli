@@ -105,7 +105,7 @@ def comments_report_cmd(
     if not is_write_enabled():
         emit_error("Write operations require SUBSTACK_ENABLE_WRITE=true", pretty=pretty)
         return
-    if category not in VALID_CATEGORIES:
+    if category not in VALID_CATEGORIES:  # core re-validates for programmatic callers
         emit_error(
             f"Invalid --category {category!r}. "
             f"Valid values: {sorted(VALID_CATEGORIES)}",
@@ -191,7 +191,7 @@ def comments_report_user_cmd(
     if not is_write_enabled():
         emit_error("Write operations require SUBSTACK_ENABLE_WRITE=true", pretty=pretty)
         return
-    if category not in VALID_CATEGORIES:
+    if category not in VALID_CATEGORIES:  # core re-validates for programmatic callers
         emit_error(
             f"Invalid --category {category!r}. "
             f"Valid values: {sorted(VALID_CATEGORIES)}",
