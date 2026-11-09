@@ -112,6 +112,7 @@ def test_comments_bans_no_auth_raises(
     assert result.exit_code != 0
     err = json.loads(result.output)
     assert err["error"] is True
+    assert err["status_code"] is None
 
 
 # ---------------------------------------------------------------------------
@@ -194,6 +195,7 @@ def test_moderation_report_categories_no_auth(
     assert result.exit_code != 0
     err = json.loads(result.output)
     assert err["error"] is True
+    assert err["status_code"] is None
 
 
 # ---------------------------------------------------------------------------
@@ -275,3 +277,4 @@ def test_moderation_delete_reasons_no_auth(
     assert result.exit_code != 0
     err = json.loads(result.output)
     assert err["error"] is True
+    assert err["status_code"] is None
