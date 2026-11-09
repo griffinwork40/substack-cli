@@ -138,6 +138,11 @@ def report_note_reply(
     Note replies live on substack.com (host "A"), not on the publication host.
     The endpoint path is identical to report_comment but the host differs.
     """
+    # Intentional library-level defense for programmatic callers: re-run the
+    # write-gate and category checks even though comments_report_cmd already
+    # validates them at the CLI layer.  This keeps report_note_reply safe when
+    # called directly (e.g. from scripts or tests) without going through the
+    # CLI path.
     if not is_write_enabled():
         raise ValueError("Write operations require SUBSTACK_ENABLE_WRITE=true")
     if category not in VALID_CATEGORIES:

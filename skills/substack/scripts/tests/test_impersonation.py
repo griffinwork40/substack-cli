@@ -382,6 +382,36 @@ class TestWalkComments:
     def test_non_dict_entries_skipped(self):
         assert _walk_comments([None, "bad", 42]) == []
 
+    def test_sibling_order_preserved(self):
+        """Multiple siblings at each level must appear left-to-right."""
+        comments = [
+            {"id": 1, "children": [{"id": 2}, {"id": 3}]},
+            {"id": 4, "children": [{"id": 5}]},
+        ]
+        ids = [c["id"] for c in _walk_comments(comments)]
+        assert ids == [1, 2, 3, 4, 5]
+
+    def test_comments_key_as_children(self):
+        """Nodes using 'comments' key (not 'children') are also flattened."""
+        comments = [{"id": 1, "comments": [{"id": 2}]}]
+        assert [c["id"] for c in _walk_comments(comments)] == [1, 2]
+
+    def test_deep_tree_no_recursion_error(self):
+        """A chain 2000 nodes deep must not raise RecursionError.
+
+        Previously the recursive implementation would exceed Python's default
+        recursion limit (~1000) on such a tree.
+        """
+        # Build a chain: node 0 → node 1 → … → node 1999
+        depth = 2000
+        # Construct from the bottom up
+        node = {"id": depth - 1}
+        for i in range(depth - 2, -1, -1):
+            node = {"id": i, "children": [node]}
+        flat = _walk_comments([node])
+        assert len(flat) == depth
+        assert [c["id"] for c in flat] == list(range(depth))
+
 
 # ---------------------------------------------------------------------------
 # _record_candidate — routing, daily cap, dedupe
@@ -590,6 +620,85 @@ class TestRemovePrefix:
         assert "cc-12345".removeprefix("c-") == "cc-12345"
         # Contrast: "cc-12345".lstrip("c-") would return "12345" (wrong)
         assert "cc-12345".lstrip("c-") == "12345"
+
+
+# ---------------------------------------------------------------------------
+# Item 2 — entity_key format: skip + warn on unexpected prefix
+# ---------------------------------------------------------------------------
+
+class TestEntityKeyFormat:
+    """run_scan skips note items whose entity_key lacks the 'c-' prefix,
+    and emits a warning to stderr for non-empty unexpected keys."""
+
+    def _make_scan_client(self, note_items):
+        """Return a mock client that yields the given note_items from the Notes feed."""
+        client = mock.MagicMock()
+        # archive returns empty list → no post comments to scan
+        # Notes feed returns note_items
+        client.get.side_effect = [[], note_items]
+        return client
+
+    def test_c_prefix_item_is_processed(self):
+        """entity_key='c-42' with no comment.id → note_id extracted, item scanned."""
+        from substack_cli.impersonation import run_scan
+        item = {"entity_key": "c-42", "item": {"comment": {}, "children": []}}
+        client = self._make_scan_client([item])
+        env = {k: v for k, v in os.environ.items() if k != "SUBSTACK_ENABLE_WRITE"}
+        with mock.patch.dict(os.environ, env, clear=True):
+            result = run_scan(client, post_limit=1, notes_limit=1, dry_run=True)
+        assert result["notes_scanned"] == 1
+
+    def test_unexpected_key_format_is_skipped(self, capsys):
+        """entity_key='note-123' (no 'c-' prefix, no comment.id) → item skipped,
+        warning written to stderr, notes_scanned stays 0."""
+        from substack_cli.impersonation import run_scan
+        item = {"entity_key": "note-123", "item": {"comment": {}, "children": []}}
+        client = self._make_scan_client([item])
+        env = {k: v for k, v in os.environ.items() if k != "SUBSTACK_ENABLE_WRITE"}
+        with mock.patch.dict(os.environ, env, clear=True):
+            result = run_scan(client, post_limit=1, notes_limit=1, dry_run=True)
+        assert result["notes_scanned"] == 0
+        captured = capsys.readouterr()
+        assert "note-123" in captured.err
+        assert "Warning" in captured.err
+
+    def test_empty_entity_key_no_comment_id_skipped_silently(self, capsys):
+        """entity_key='' and no comment.id → skipped silently (no warning)."""
+        from substack_cli.impersonation import run_scan
+        item = {"entity_key": "", "item": {"comment": {}, "children": []}}
+        client = self._make_scan_client([item])
+        env = {k: v for k, v in os.environ.items() if k != "SUBSTACK_ENABLE_WRITE"}
+        with mock.patch.dict(os.environ, env, clear=True):
+            result = run_scan(client, post_limit=1, notes_limit=1, dry_run=True)
+        assert result["notes_scanned"] == 0
+        captured = capsys.readouterr()
+        assert captured.err == ""
+
+    def test_comment_id_takes_precedence_over_entity_key(self):
+        """comment.id is present → note_id uses it, entity_key ignored."""
+        from substack_cli.impersonation import run_scan
+        item = {
+            "entity_key": "note-999",  # bad format — but comment.id overrides
+            "item": {"comment": {"id": 77}, "children": []},
+        }
+        client = self._make_scan_client([item])
+        env = {k: v for k, v in os.environ.items() if k != "SUBSTACK_ENABLE_WRITE"}
+        with mock.patch.dict(os.environ, env, clear=True):
+            result = run_scan(client, post_limit=1, notes_limit=1, dry_run=True)
+        assert result["notes_scanned"] == 1
+
+    def test_valid_key_does_not_change_json_output_schema(self):
+        """Valid c- key: result dict keys match the documented schema."""
+        from substack_cli.impersonation import run_scan
+        item = {"entity_key": "c-55", "item": {"comment": {}, "children": []}}
+        client = self._make_scan_client([item])
+        env = {k: v for k, v in os.environ.items() if k != "SUBSTACK_ENABLE_WRITE"}
+        with mock.patch.dict(os.environ, env, clear=True):
+            result = run_scan(client, post_limit=1, notes_limit=1, dry_run=True)
+        for key in ("posts_scanned", "notes_scanned", "candidates_found",
+                    "uncertain_count", "would_report", "uncertain",
+                    "log_path", "summary_path"):
+            assert key in result, f"Missing key {key!r} in result"
 
 
 # ---------------------------------------------------------------------------
