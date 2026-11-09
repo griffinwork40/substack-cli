@@ -806,3 +806,48 @@ class TestRunScanArchiveCall:
         archive_calls = [c for c in client.get.call_args_list
                          if c.args and c.args[0] == "/api/v1/archive"]
         assert len(archive_calls) == 2  # first call + one cursor follow; then loop stops
+        # Both pages deliver {"id": 1} and comments fetch returns [] → 2 posts scanned
+        assert result["posts_scanned"] == 2
+
+    def test_overshoot_capped_at_post_limit(self):
+        """posts list must never exceed post_limit even when a page delivers more."""
+        from substack_cli.impersonation import run_scan
+
+        # Two pages of 25; post_limit=30 → should stop at exactly 30
+        page1 = {"posts": [{"id": i} for i in range(1, 26)], "nextCursor": "tok1"}
+        page2 = {"posts": [{"id": i} for i in range(26, 51)], "nextCursor": None}
+
+        client = mock.MagicMock()
+        client.get.side_effect = lambda path, **kw: (
+            page1 if path == "/api/v1/archive" and "cursor" not in kw else
+            page2 if path == "/api/v1/archive" and kw.get("cursor") == "tok1" else
+            []
+        )
+
+        with mock.patch.dict(os.environ, self._make_env(), clear=True):
+            with mock.patch("substack_cli.impersonation.time.sleep"):
+                result = run_scan(client, post_limit=30, notes_limit=0, dry_run=True)
+
+        assert result["posts_scanned"] == 30, (
+            f"expected 30 posts_scanned, got {result['posts_scanned']}"
+        )
+
+    def test_bare_list_archive_response(self):
+        """Archive returning a bare list (no envelope) must be handled correctly."""
+        from substack_cli.impersonation import run_scan
+
+        # Bare list — no "posts" key, no "nextCursor"
+        bare_page = [{"id": i} for i in range(1, 6)]
+
+        client = mock.MagicMock()
+        client.get.side_effect = lambda path, **kw: (
+            bare_page if path == "/api/v1/archive" else []
+        )
+
+        with mock.patch.dict(os.environ, self._make_env(), clear=True):
+            with mock.patch("substack_cli.impersonation.time.sleep"):
+                result = run_scan(client, post_limit=10, notes_limit=0, dry_run=True)
+
+        assert result["posts_scanned"] == 5, (
+            f"expected 5 posts_scanned from bare-list response, got {result['posts_scanned']}"
+        )

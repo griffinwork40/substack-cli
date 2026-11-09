@@ -40,6 +40,8 @@ import os
 import time
 from datetime import datetime, timezone
 
+_PAGE_CAP = 25  # Substack archive endpoint caps page size at 25
+
 from substack_cli.impersonation_detect import (
     ALLOWLISTED_USER_IDS,
     REAL_CHARLIE_USER_ID,
@@ -111,12 +113,11 @@ def run_scan(
     # 1. Scan recent post comments                                        #
     # ------------------------------------------------------------------ #
     # Substack rejects offset=0 (and any offset param) since Nov 2026;
-    # limit is capped at 25 per page. For post_limit > 25 we follow
-    # nextCursor until we have enough posts or the feed is exhausted.
-    _PAGE_CAP = 25
+    # limit is capped at _PAGE_CAP (25) per page. For post_limit > 25 we
+    # follow nextCursor until we have enough posts or the feed is exhausted.
 
     if verbose:
-        print(f"[scan] Fetching archive (limit={post_limit}) …")
+        print(f"[scan] Fetching archive (post_limit={post_limit}, page_cap={_PAGE_CAP}) …")
 
     try:
         posts: list = []
@@ -132,11 +133,13 @@ def run_scan(
             if not _page:
                 break
             posts.extend(_page)
+            posts = posts[:post_limit]  # never overshoot the requested limit
             _nxt = _page_raw.get("nextCursor") if isinstance(_page_raw, dict) else None
             if not _nxt or _nxt in _seen_cursors:
                 break
             _seen_cursors.add(_nxt)
             _cursor = _nxt
+            time.sleep(REQUEST_DELAY)  # polite delay between pagination pages
     except Exception as exc:
         posts = []
         if verbose:
