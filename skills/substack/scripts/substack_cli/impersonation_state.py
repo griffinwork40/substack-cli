@@ -94,10 +94,9 @@ def _walk_comments(comments: list) -> list[dict]:
     each node appears before its children (pre-order, depth-first).
     """
     flat: list[dict] = []
-    # Stack entries are (node, index_into_children_already_emitted).
-    # We push (comment, children_list) pairs; process each comment first,
-    # then push its children onto the stack in reverse order so the leftmost
-    # child is processed next (preserving sibling order).
+    # Stack holds plain comment dicts awaiting processing.  We seed it with
+    # the input list in reverse order so the leftmost comment is on top and
+    # is processed first (pre-order, depth-first, sibling order preserved).
     stack: list[dict] = list(reversed(comments))
     while stack:
         c = stack.pop()

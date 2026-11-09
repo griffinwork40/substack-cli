@@ -8,11 +8,13 @@ must remain command-free and import-cycle-free).
 Note: this module also registers three read-only Typer commands
 (``comments bans``, ``moderation report-categories``,
 ``moderation delete-reasons``) that were moved here during the #34 merge to
-keep moderation.py under the LOC limit.  The imports for those commands
-(app, typer, AuthError, etc.) appear below the helper functions rather than at
-the top of the file; this is intentional — the command-registration block
-depends on ``moderation_app`` being defined in this same module, and moving
-the imports to the top would not change the registration order.
+keep moderation.py under the LOC limit.  ``moderation_app`` is defined in
+this module and registered via ``app.add_typer(moderation_app, name="moderation")``.
+The imports for those commands (app, typer, AuthError, etc.) appear below the
+helper functions rather than at the top of the file; this is intentional —
+the command-registration block depends on ``moderation_app`` being defined in
+this same module, and moving the imports to the top would not change the
+registration order.
 """
 from __future__ import annotations
 
