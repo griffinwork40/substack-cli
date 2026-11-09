@@ -110,12 +110,33 @@ def run_scan(
     # ------------------------------------------------------------------ #
     # 1. Scan recent post comments                                        #
     # ------------------------------------------------------------------ #
+    # Substack rejects offset=0 (and any offset param) since Nov 2026;
+    # limit is capped at 25 per page. For post_limit > 25 we follow
+    # nextCursor until we have enough posts or the feed is exhausted.
+    _PAGE_CAP = 25
+
     if verbose:
         print(f"[scan] Fetching archive (limit={post_limit}) …")
 
     try:
-        archive = client.get("/api/v1/archive", sort="new", offset=0, limit=post_limit)
-        posts = archive if isinstance(archive, list) else archive.get("posts", [])
+        posts: list = []
+        _cursor: str | None = None
+        _seen_cursors: set = set()
+        while len(posts) < post_limit:
+            _fetch = min(_PAGE_CAP, post_limit - len(posts))
+            _params: dict = {"sort": "new", "limit": _fetch}
+            if _cursor:
+                _params["cursor"] = _cursor
+            _page_raw = client.get("/api/v1/archive", **_params)
+            _page = _page_raw if isinstance(_page_raw, list) else _page_raw.get("posts", [])
+            if not _page:
+                break
+            posts.extend(_page)
+            _nxt = _page_raw.get("nextCursor") if isinstance(_page_raw, dict) else None
+            if not _nxt or _nxt in _seen_cursors:
+                break
+            _seen_cursors.add(_nxt)
+            _cursor = _nxt
     except Exception as exc:
         posts = []
         if verbose:
