@@ -396,6 +396,21 @@ class TestWalkComments:
         comments = [{"id": 1, "comments": [{"id": 2}]}]
         assert [c["id"] for c in _walk_comments(comments)] == [1, 2]
 
+    def test_node_with_both_children_and_comments_keys(self):
+        """A node with both 'children' and 'comments' keys: 'children' takes
+        precedence (``c.get("children") or c.get("comments")``), so only the
+        'children' subtree is traversed."""
+        comments = [
+            {
+                "id": 1,
+                "children": [{"id": 2}],
+                "comments": [{"id": 3}],
+            }
+        ]
+        ids = [c["id"] for c in _walk_comments(comments)]
+        # 'children' wins: node 1 then child 2; node 3 (from 'comments') is NOT visited
+        assert ids == [1, 2]
+
     def test_deep_tree_no_recursion_error(self):
         """A chain 2000 nodes deep must not raise RecursionError.
 

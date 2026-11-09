@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys as _sys
 import time
 from datetime import datetime, timezone
 
@@ -83,7 +84,6 @@ def run_scan(
         # and --yes before sending any POST requests. See auth.py for the
         # write-gate pattern used by moderation commands.
         import json as _json
-        import sys as _sys
         _sys.stderr.write(
             _json.dumps({"error": True, "message": "live reporting not implemented; impersonation scan is dry-run only"})
             + "\n"
@@ -220,13 +220,12 @@ def run_scan(
         item = item_wrapper.get("item") or item_wrapper
         note_comment = item.get("comment") or {}
         _raw_entity_key = item_wrapper.get("entity_key", "")
-        if note_comment.get("id"):
+        if note_comment.get("id") is not None:
             note_id = note_comment["id"]
         elif _raw_entity_key.startswith("c-"):
             note_id = _raw_entity_key[2:]  # strip the "c-" prefix
         else:
             if _raw_entity_key:
-                import sys as _sys
                 _sys.stderr.write(
                     f"[impersonation] Warning: unexpected entity_key format"
                     f" {_raw_entity_key!r} — skipping note item\n"
