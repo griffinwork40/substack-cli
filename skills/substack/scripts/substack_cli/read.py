@@ -603,7 +603,7 @@ def get_posts_analytics(
     gracefully: a post whose detail call fails is kept with stats={}."""
     if sort not in _STAT_SORT_FIELDS:
         raise ValueError(f"sort must be one of: {', '.join(_STAT_SORT_FIELDS)}")
-    posts = get_archive(client, sort="new", offset=0, limit=limit)
+    posts = get_archive(client, sort="new", limit=limit)
     ranked: list = []
     for post in posts:
         if not isinstance(post, dict):
