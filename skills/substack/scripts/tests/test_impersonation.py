@@ -604,3 +604,96 @@ class TestNoDryRunRefuses:
         with pytest.raises(SystemExit) as exc_info:
             run_scan(client, post_limit=0, notes_limit=0, dry_run=False)
         assert exc_info.value.code == 1
+
+
+# ---------------------------------------------------------------------------
+# Fix: impersonation scan archive call — no offset=0, limit capped at 25,
+# cursor pagination for post_limit > 25
+# ---------------------------------------------------------------------------
+
+class TestRunScanArchiveCall:
+    """Verify the archive GET params match Substack's Nov 2026 requirements."""
+
+    def _make_env(self):
+        return {k: v for k, v in os.environ.items() if k != "SUBSTACK_ENABLE_WRITE"}
+
+    def test_offset_never_sent(self):
+        """offset param must NOT appear in the archive GET call (Substack 400s on it)."""
+        from substack_cli.impersonation import run_scan
+        client = mock.MagicMock()
+        client.get.return_value = []
+        with mock.patch.dict(os.environ, self._make_env(), clear=True):
+            with mock.patch("substack_cli.impersonation.time.sleep"):
+                run_scan(client, post_limit=5, notes_limit=0, dry_run=True)
+        archive_calls = [c for c in client.get.call_args_list
+                         if c.args and c.args[0] == "/api/v1/archive"]
+        assert archive_calls, "expected at least one /api/v1/archive call"
+        for call in archive_calls:
+            assert "offset" not in call.kwargs, (
+                f"offset was passed to /api/v1/archive: {call.kwargs}"
+            )
+
+    def test_limit_capped_at_25(self):
+        """limit sent to /api/v1/archive must never exceed 25."""
+        from substack_cli.impersonation import run_scan
+        client = mock.MagicMock()
+        client.get.return_value = []
+        with mock.patch.dict(os.environ, self._make_env(), clear=True):
+            with mock.patch("substack_cli.impersonation.time.sleep"):
+                # post_limit=50 — would have been sent as limit=50 before this fix
+                run_scan(client, post_limit=50, notes_limit=0, dry_run=True)
+        archive_calls = [c for c in client.get.call_args_list
+                         if c.args and c.args[0] == "/api/v1/archive"]
+        assert archive_calls
+        for call in archive_calls:
+            assert call.kwargs.get("limit", 0) <= 25, (
+                f"limit > 25 sent to /api/v1/archive: {call.kwargs}"
+            )
+
+    def test_cursor_pagination_follows_nextcursor(self):
+        """When nextCursor is returned, subsequent calls pass cursor=<token>."""
+        from substack_cli.impersonation import run_scan
+
+        page1 = {"posts": [{"id": i} for i in range(1, 26)], "nextCursor": "tok1"}
+        page2 = {"posts": [{"id": i} for i in range(26, 31)], "nextCursor": None}
+
+        client = mock.MagicMock()
+        # archive: page1 then page2; all other calls (comments, notes) return []
+        client.get.side_effect = lambda path, **kw: (
+            page1 if path == "/api/v1/archive" and "cursor" not in kw else
+            page2 if path == "/api/v1/archive" and kw.get("cursor") == "tok1" else
+            []
+        )
+
+        with mock.patch.dict(os.environ, self._make_env(), clear=True):
+            with mock.patch("substack_cli.impersonation.time.sleep"):
+                result = run_scan(client, post_limit=30, notes_limit=0, dry_run=True)
+
+        # Should have fetched page1 (25 posts) then page2 (5 posts) = 30 total
+        assert result["posts_scanned"] == 30
+
+        archive_calls = [c for c in client.get.call_args_list
+                         if c.args and c.args[0] == "/api/v1/archive"]
+        assert len(archive_calls) == 2
+        assert "cursor" not in archive_calls[0].kwargs
+        assert archive_calls[1].kwargs.get("cursor") == "tok1"
+
+    def test_cursor_loop_guard_stops_on_repeated_cursor(self):
+        """A repeated nextCursor must not cause an infinite loop."""
+        from substack_cli.impersonation import run_scan
+
+        # API always returns the same cursor — without the loop guard this loops forever
+        always_same = {"posts": [{"id": 1}], "nextCursor": "same"}
+        client = mock.MagicMock()
+        client.get.side_effect = lambda path, **kw: (
+            always_same if path == "/api/v1/archive" else []
+        )
+
+        with mock.patch.dict(os.environ, self._make_env(), clear=True):
+            with mock.patch("substack_cli.impersonation.time.sleep"):
+                result = run_scan(client, post_limit=100, notes_limit=0, dry_run=True)
+
+        # Should stop after seeing "same" twice (first page delivers it, second is refused)
+        archive_calls = [c for c in client.get.call_args_list
+                         if c.args and c.args[0] == "/api/v1/archive"]
+        assert len(archive_calls) == 2  # first call + one cursor follow; then loop stops
