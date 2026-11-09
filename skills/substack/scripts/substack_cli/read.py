@@ -66,14 +66,33 @@ def get_archive(
     offset: int = 0,
     limit: int = 25,
     search: Optional[str] = None,
+    cursor: Optional[str] = None,
+    all_pages: bool = False,
 ) -> list:
     """List published posts from the archive. Uses /api/v1/archive (singular).
-    Tolerates both bare-array and {posts, hasMore} envelope shapes via extract_list."""
-    params: dict = {"sort": sort, "offset": offset, "limit": limit}
+    Tolerates both bare-array and {posts, nextCursor} envelope shapes via extract_list.
+
+    Since Nov 2026 Substack rejects any `offset` param (400) and caps `limit` at 25;
+    paging is by the opaque `nextCursor` token, sent back as `cursor`. `offset` is only
+    sent when non-zero, for older deployments. `all_pages` follows nextCursor to the end."""
+    params: dict = {"sort": sort, "limit": limit}
+    if offset:
+        params["offset"] = offset
     if search is not None:
         params["search"] = search
-    data = client.get("/api/v1/archive", **params)
-    return extract_list(data, "posts")
+    if cursor:
+        params["cursor"] = cursor
+    posts: list = []
+    seen_cursors: set = set()
+    while True:
+        data = client.get("/api/v1/archive", **params)
+        page = extract_list(data, "posts")
+        posts.extend(page)
+        nxt = data.get("nextCursor") if isinstance(data, dict) else None
+        if not all_pages or not page or not nxt or nxt in seen_cursors:
+            return posts
+        seen_cursors.add(nxt)
+        params["cursor"] = nxt
 
 
 def list_categories(client: SubstackClient) -> list:
@@ -637,12 +656,18 @@ def archive_cmd(
     offset: int = 0,
     limit: int = 25,
     search: str = None,
+    cursor: str = None,
+    all: bool = False,
     pretty: bool = False,
 ):
-    """List published posts from the archive. Public — works without auth."""
+    """List published posts from the archive. Public — works without auth.
+    Use --all to follow Substack's nextCursor through every page."""
     try:
         client = _make_client(anonymous=True)
-        result = get_archive(client, sort=sort, offset=offset, limit=limit, search=search)
+        result = get_archive(
+            client, sort=sort, offset=offset, limit=limit, search=search,
+            cursor=cursor, all_pages=all,
+        )
         output_list(result, pretty=pretty, title="Archive")
     except (SubstackApiError, AuthError) as exc:
         emit_error(str(exc), status_code=getattr(exc, "status_code", None), pretty=pretty)
