@@ -122,7 +122,15 @@ def test_report_comment_core_accepts_valid_category(monkeypatch, cat):
     client.post.return_value = {"ok": True}
     result = report_comment(client, 1, cat, "", True, None, None)
     assert result == {"ok": True}
-    client.post.assert_called_once()
+    expected_body = {
+        "reportCategory": cat,
+        "details": "",
+        "reportedToSubstack": True,
+    }
+    client.post.assert_called_once_with(
+        f"/api/v1/comment/1/report",
+        json_body=expected_body,
+    )
 
 
 def test_report_user_profile_core_rejects_invalid_category(monkeypatch):
@@ -144,7 +152,17 @@ def test_report_user_profile_core_accepts_valid_category(monkeypatch, cat):
     client.post.return_value = {"ok": True}
     result = report_user_profile(client, 1, cat, "", True, None)
     assert result == {"ok": True}
-    client.post.assert_called_once()
+    expected_body = {
+        "reportCategory": cat,
+        "details": "",
+        "reportedToSubstack": True,
+        "surface": "profile",
+    }
+    client.post.assert_called_once_with(
+        f"/api/v1/users/1/profile/report",
+        host="A",
+        json_body=expected_body,
+    )
 
 
 # ---------------------------------------------------------------------------
