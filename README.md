@@ -39,7 +39,7 @@ substack --help
 - **Read (no auth):** list the archive, fetch a single post, pull the RSS feed.
 - **Search & discovery:** search a publication's archive, list categories and sections, and pull cross-publication category leaderboards (top 25 publications by paid subscribers, total reach, or growth — no auth needed).
 - **Publishing:** create / edit / delete drafts, publish or schedule posts, upload images (Markdown → ProseMirror conversion).
-- **Moderation:** manage comments and reactions — create, delete, react, report spam/impersonation, ban commenters, and look up existing bans.
+- **Moderation:** manage comments and reactions — create, delete, react, **read who liked a comment or note reply** (`comments reactions`), report spam/impersonation, ban commenters, and look up existing bans.
 - **Notes:** create, list (paginated `--all` with `--since` + `--max-pages`), read, delete, and **fetch replies** (`notes replies --all --descendants`) on Substack Notes. All Notes endpoints use `substack.com` (host A), not the publication subdomain.
 - **Audience:** manage subscribers, cross-publication recommendations, and post tags.
 - **Analytics:** per-post and publication-level stats.
