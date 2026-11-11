@@ -33,9 +33,11 @@ from substack_cli.models import extract_list
 def _parse_inline(text: str) -> list:
     """Parse inline markdown (bold, italic, links) into ProseMirror text nodes."""
     nodes: list = []
-    # Combined regex: **bold**, *italic*, [text](url)
+    # Combined regex: ***bold italic*** must come before **bold** so the
+    # triple-delimiter is consumed as a unit and not mis-parsed as bold("*…").
     pattern = re.compile(
-        r"\*\*(.+?)\*\*"  # bold
+        r"\*\*\*(.+?)\*\*\*"  # bold+italic (must precede **)
+        r"|\*\*(.+?)\*\*"  # bold
         r"|\*(.+?)\*"  # italic
         r"|\[(.+?)\]\((.+?)\)",  # link
     )
@@ -44,20 +46,28 @@ def _parse_inline(text: str) -> list:
         # Text before the match
         if m.start() > pos:
             nodes.append({"type": "text", "text": text[pos : m.start()]})
-        if m.group(1) is not None:  # bold
-            nodes.append(
-                {"type": "text", "text": m.group(1), "marks": [{"type": "strong"}]}
-            )
-        elif m.group(2) is not None:  # italic
-            nodes.append(
-                {"type": "text", "text": m.group(2), "marks": [{"type": "em"}]}
-            )
-        elif m.group(3) is not None:  # link
+        if m.group(1) is not None:  # bold+italic
             nodes.append(
                 {
                     "type": "text",
-                    "text": m.group(3),
-                    "marks": [{"type": "link", "attrs": {"href": m.group(4)}}],
+                    "text": m.group(1),
+                    "marks": [{"type": "strong"}, {"type": "em"}],
+                }
+            )
+        elif m.group(2) is not None:  # bold
+            nodes.append(
+                {"type": "text", "text": m.group(2), "marks": [{"type": "strong"}]}
+            )
+        elif m.group(3) is not None:  # italic
+            nodes.append(
+                {"type": "text", "text": m.group(3), "marks": [{"type": "em"}]}
+            )
+        elif m.group(4) is not None:  # link
+            nodes.append(
+                {
+                    "type": "text",
+                    "text": m.group(4),
+                    "marks": [{"type": "link", "attrs": {"href": m.group(5)}}],
                 }
             )
         pos = m.end()
