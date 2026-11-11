@@ -847,6 +847,36 @@ class TestRunScanArchiveCall:
             f"expected 30 posts_scanned, got {result['posts_scanned']}"
         )
 
+    def test_no_extra_request_when_server_overdelivers_with_next_cursor(self):
+        """When a page fills post_limit AND the server still returns a nextCursor,
+        no extra request must fire (finding #59 fix: break after slice)."""
+        from substack_cli.impersonation import run_scan
+
+        # Server over-delivers 25 items for a post_limit=10 request,
+        # and also returns a valid nextCursor — without the break this
+        # would trigger one extra unnecessary archive GET.
+        page1 = {"posts": [{"id": i} for i in range(1, 26)], "nextCursor": "extra_tok"}
+
+        call_count = {"n": 0}
+
+        def _side_effect(path, **kw):
+            if path == "/api/v1/archive":
+                call_count["n"] += 1
+                return page1
+            return []
+
+        client = mock.MagicMock()
+        client.get.side_effect = _side_effect
+
+        with mock.patch.dict(os.environ, self._make_env(), clear=True):
+            with mock.patch("substack_cli.impersonation.time.sleep"):
+                result = run_scan(client, post_limit=10, notes_limit=0, dry_run=True)
+
+        assert result["posts_scanned"] == 10
+        assert call_count["n"] == 1, (
+            f"expected exactly 1 archive request, got {call_count['n']}"
+        )
+
     def test_bare_list_archive_response(self):
         """Archive returning a bare list (no envelope) must be handled correctly."""
         from substack_cli.impersonation import run_scan

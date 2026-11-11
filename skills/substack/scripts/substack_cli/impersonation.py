@@ -41,8 +41,6 @@ import sys as _sys
 import time
 from datetime import datetime, timezone
 
-_PAGE_CAP = 25  # Substack archive endpoint caps page size at 25
-
 from substack_cli.impersonation_detect import (
     ALLOWLISTED_USER_IDS,
     REAL_CHARLIE_USER_ID,
@@ -62,6 +60,8 @@ from substack_cli.impersonation_state import (
     _walk_comments,
     _write_summary,
 )
+
+_PAGE_CAP = 25  # Substack archive endpoint caps page size at 25
 
 
 def run_scan(
@@ -134,6 +134,8 @@ def run_scan(
                 break
             posts.extend(_page)
             posts = posts[:post_limit]  # never overshoot the requested limit
+            if len(posts) >= post_limit:
+                break
             _nxt = _page_raw.get("nextCursor") if isinstance(_page_raw, dict) else None
             if not _nxt or _nxt in _seen_cursors:
                 break
