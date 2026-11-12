@@ -26,6 +26,7 @@ from substack_cli import notes as _notes      # noqa: E402, F401
 from substack_cli import chat as _chat        # noqa: E402, F401
 from substack_cli import moderation as _moderation  # noqa: E402, F401
 from substack_cli import impersonation_cmd as _impersonation_cmd  # noqa: E402, F401
+from substack_cli import reactions as _reactions  # noqa: E402, F401
 
 from substack_cli.app import main  # noqa: E402
 
