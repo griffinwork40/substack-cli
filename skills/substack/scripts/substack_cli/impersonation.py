@@ -35,7 +35,7 @@ Daily cap
 """
 from __future__ import annotations
 
-import json
+import json as _json
 import os
 import sys as _sys
 import time
@@ -85,7 +85,6 @@ def run_scan(
         # NOTE: Any future live reporting path must require is_write_enabled()
         # and --yes before sending any POST requests. See auth.py for the
         # write-gate pattern used by moderation commands.
-        import json as _json
         _sys.stderr.write(
             _json.dumps({"error": True, "message": "live reporting not implemented; impersonation scan is dry-run only"})
             + "\n"
@@ -281,7 +280,7 @@ def run_scan(
         "uncertain": uncertain,
     }
     STATE_DIR.mkdir(parents=True, exist_ok=True)
-    log_path.write_text(json.dumps(log_data, indent=2))
+    log_path.write_text(_json.dumps(log_data, indent=2))
 
     # Morning summary markdown
     _write_summary(
@@ -334,6 +333,5 @@ def run_cli(
         verbose=verbose,
     )
 
-    import json as _json
     print(_json.dumps(result, indent=2))
     print(f"\n[scan] Summary written to: {result['summary_path']}", flush=True)

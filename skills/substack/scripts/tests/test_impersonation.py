@@ -410,6 +410,7 @@ class TestWalkComments:
         ids = [c["id"] for c in _walk_comments(comments)]
         # 'children' wins: node 1 then child 2; node 3 (from 'comments') is NOT visited
         assert ids == [1, 2]
+        assert 3 not in ids
 
     def test_deep_tree_no_recursion_error(self):
         """A chain 2000 nodes deep must not raise RecursionError.
