@@ -10,7 +10,7 @@ from typing import Optional
 
 import typer
 
-from substack_cli.app import moderation_app
+from substack_cli.moderation_helpers import moderation_app
 from substack_cli.auth import AuthError, resolve_cookies, resolve_publication_url
 from substack_cli.client import SubstackApiError, SubstackClient, emit_error, output
 from substack_cli.moderation_hidden import get_hidden_comments
