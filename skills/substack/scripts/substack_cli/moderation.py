@@ -35,7 +35,7 @@ from substack_cli.moderation_core import (
     report_note_reply,
     report_user_profile,
 )
-
+import substack_cli.moderation_hidden_cmd  # noqa: F401,E402 — registers `moderation hidden`
 
 
 # ---------------------------------------------------------------------------
