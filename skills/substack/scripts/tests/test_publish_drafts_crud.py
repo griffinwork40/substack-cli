@@ -12,6 +12,7 @@ import respx
 from substack_cli.client import SubstackApiError, SubstackClient, SUBSTACK_COM
 from substack_cli.publish import (
     _markdown_to_prosemirror_doc,
+    _parse_inline,
     _prosemirror_doc_to_body_string,
     create_draft,
     delete_draft,
@@ -236,3 +237,141 @@ def test_prosemirror_doc_to_body_string_is_valid_json_string_not_dict():
     parsed = json.loads(result)
     assert isinstance(parsed, dict)
     assert parsed == doc
+
+
+# ---------------------------------------------------------------------------
+# _parse_inline — bold+italic (***…***) and regression cases
+# ---------------------------------------------------------------------------
+
+def test_parse_inline_bold_italic_triple_delimiter_produces_single_node():
+    """***bold italic*** must yield ONE text node with both strong and em marks,
+    not a bold node containing a leading asterisk."""
+    nodes = _parse_inline("***bold italic***")
+
+    assert len(nodes) == 1
+    node = nodes[0]
+    assert node["type"] == "text"
+    assert node["text"] == "bold italic"
+    mark_types = {m["type"] for m in node["marks"]}
+    assert mark_types == {"strong", "em"}
+
+
+def test_parse_inline_bold_italic_no_stray_asterisk_text_node():
+    """Before the fix this produced a trailing {'type':'text','text':'*'} node."""
+    nodes = _parse_inline("***bold italic***")
+
+    texts = [n.get("text", "") for n in nodes]
+    assert "*" not in texts
+
+
+def test_parse_inline_bold_still_works():
+    nodes = _parse_inline("**bold**")
+
+    assert len(nodes) == 1
+    assert nodes[0]["text"] == "bold"
+    assert any(m["type"] == "strong" for m in nodes[0]["marks"])
+    assert not any(m["type"] == "em" for m in nodes[0]["marks"])
+
+
+def test_parse_inline_italic_still_works():
+    nodes = _parse_inline("*italic*")
+
+    assert len(nodes) == 1
+    assert nodes[0]["text"] == "italic"
+    assert any(m["type"] == "em" for m in nodes[0]["marks"])
+    assert not any(m["type"] == "strong" for m in nodes[0]["marks"])
+
+
+def test_parse_inline_bold_italic_mixed_with_plain_text():
+    nodes = _parse_inline("start ***hi*** end")
+
+    assert nodes[0] == {"type": "text", "text": "start "}
+    mid = nodes[1]
+    assert mid["text"] == "hi"
+    assert {m["type"] for m in mid["marks"]} == {"strong", "em"}
+    assert nodes[2] == {"type": "text", "text": " end"}
+
+
+def test_parse_inline_bold_nested_inside_triple_not_mismatched():
+    """**bold** after ***x*** should still parse as plain bold."""
+    nodes = _parse_inline("***a*** and **b**")
+
+    assert nodes[0]["text"] == "a"
+    assert {m["type"] for m in nodes[0]["marks"]} == {"strong", "em"}
+    assert nodes[1] == {"type": "text", "text": " and "}
+    assert nodes[2]["text"] == "b"
+    assert {m["type"] for m in nodes[2]["marks"]} == {"strong"}
+
+
+def test_parse_inline_unmatched_asterisks_pass_through_as_text():
+    nodes = _parse_inline("literal * asterisk")
+
+    assert len(nodes) == 1
+    assert nodes[0]["text"] == "literal * asterisk"
+    assert "marks" not in nodes[0]
+
+
+# ---------------------------------------------------------------------------
+# create_draft — direct unit tests for body_markdown and body_json paths
+# ---------------------------------------------------------------------------
+
+@respx.mock
+def test_create_draft_with_body_markdown_sends_string_draft_body(
+    fake_cookies, fake_publication_url
+):
+    route = respx.post(f"{fake_publication_url}/api/v1/drafts").mock(
+        return_value=httpx.Response(200, json={"id": 1})
+    )
+    client = SubstackClient(cookies=fake_cookies, publication_url=fake_publication_url)
+
+    create_draft(
+        client,
+        title="MD test",
+        body_markdown="Hello **world**",
+        byline_ids=[{"id": 1, "is_guest": False}],
+    )
+
+    sent = json.loads(route.calls[0].request.content)
+    assert isinstance(sent["draft_body"], str)
+    doc = json.loads(sent["draft_body"])
+    assert doc["type"] == "doc"
+    # The bold word should appear in the paragraph content
+    texts = [n["text"] for n in doc["content"][0]["content"]]
+    assert "world" in texts
+
+
+@respx.mock
+def test_create_draft_with_body_json_raw_string(fake_cookies, fake_publication_url):
+    raw_doc = {"type": "doc", "content": [{"type": "paragraph", "content": [{"type": "text", "text": "hi"}]}]}
+    route = respx.post(f"{fake_publication_url}/api/v1/drafts").mock(
+        return_value=httpx.Response(200, json={"id": 2})
+    )
+    client = SubstackClient(cookies=fake_cookies, publication_url=fake_publication_url)
+
+    create_draft(
+        client,
+        title="JSON test",
+        body_json=json.dumps(raw_doc),
+        byline_ids=[{"id": 1, "is_guest": False}],
+    )
+
+    sent = json.loads(route.calls[0].request.content)
+    assert isinstance(sent["draft_body"], str)
+    assert json.loads(sent["draft_body"]) == raw_doc
+
+
+@respx.mock
+def test_create_draft_no_body_sends_null_draft_body(fake_cookies, fake_publication_url):
+    route = respx.post(f"{fake_publication_url}/api/v1/drafts").mock(
+        return_value=httpx.Response(200, json={"id": 3})
+    )
+    client = SubstackClient(cookies=fake_cookies, publication_url=fake_publication_url)
+
+    create_draft(
+        client,
+        title="No body",
+        byline_ids=[{"id": 1, "is_guest": False}],
+    )
+
+    sent = json.loads(route.calls[0].request.content)
+    assert sent.get("draft_body") is None

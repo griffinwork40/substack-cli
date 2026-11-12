@@ -39,8 +39,8 @@ substack --help
 - **Read (no auth):** list the archive, fetch a single post, pull the RSS feed.
 - **Search & discovery:** search a publication's archive, list categories and sections, and pull cross-publication category leaderboards (top 25 publications by paid subscribers, total reach, or growth — no auth needed).
 - **Publishing:** create / edit / delete drafts, publish or schedule posts, upload images (Markdown → ProseMirror conversion).
-- **Moderation:** manage comments and reactions — create, delete, react, report spam/impersonation, ban commenters, and look up existing bans.
-- **Notes:** create, list, read, and delete Substack Notes (no edit — the API has no note-update endpoint; notes publish immediately).
+- **Moderation:** manage comments and reactions — create, delete, react, **read who liked a comment or note reply** (`comments reactions`), report spam/impersonation, ban commenters, and look up existing bans.
+- **Notes:** create, list (paginated `--all` with `--since` + `--max-pages`), read, delete, and **fetch replies** (`notes replies --all --descendants`) on Substack Notes. All Notes endpoints use `substack.com` (host A), not the publication subdomain.
 - **Audience:** manage subscribers, cross-publication recommendations, and post tags.
 - **Analytics:** per-post and publication-level stats.
 - **Machine-friendly:** compact JSON to stdout by default (`--pretty` for a Rich table/panel); errors are JSON on stderr with a nonzero exit code.
@@ -93,6 +93,78 @@ pytest -q          # 439 tests, all HTTP mocked — no real network calls
 ```
 
 Architecture, auth model, two-host routing, and a guide to adding new endpoints live in [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md). The API surface is mapped in [`skills/substack/references/substack-api.md`](skills/substack/references/substack-api.md).
+
+## Notes commands
+
+All Notes endpoints hit `https://substack.com` (host A) — a publication URL is not required.
+
+### Fetch replies for a Note
+
+```bash
+# Single page (raw API envelope)
+substack notes replies <NOTE_ID>
+
+# All pages merged
+substack notes replies <NOTE_ID> --all
+
+# All pages + recursively expand nested replies
+substack notes replies <NOTE_ID> --all --descendants
+
+# Resume from a cursor
+substack notes replies <NOTE_ID> --cursor <CURSOR>
+```
+
+`NOTE_ID` accepts a plain numeric id (`123`) or the `c-`-prefixed entity key shown by `notes list` (`c-123`).
+
+Default output shape (one page):
+```json
+{
+  "rootComment": {...},
+  "commentBranches": [{"comment": {...}, "descendantComments": [...]}],
+  "automodHiddenBranches": [...],
+  "moreBranches": 1,
+  "nextCursor": "tok"
+}
+```
+
+`--all` output (merged pages):
+```json
+{
+  "rootComment": {...},
+  "commentBranches": [...],
+  "automodHiddenBranches": [...],
+  "moreBranches": 0,
+  "nextCursor": null,
+  "pages": 2
+}
+```
+
+`--descendants` recursively fetches any branch whose `comment.children_count` exceeds the number of returned `descendantComments`, replacing `descendantComments` with the full depth-first flattened list. Capped at recursion depth 5 and 200 extra requests; if either cap is hit a top-level `"truncated": true` is added.
+
+### List a user's Notes with pagination (`--all`)
+
+```bash
+# All of your notes (paginated)
+substack notes list --mine --all
+
+# Stop at a date boundary
+substack notes list --mine --all --since 2026-10-01
+
+# Limit pages fetched (default 50)
+substack notes list --mine --all --max-pages 10
+
+# Another user's notes
+substack notes list --user-id 27965159 --all --since 2026-09-01
+```
+
+`--all` calls `GET /api/v1/reader/feed/profile/{user_id}?limit=<limit>&cursor=<c>` (host A) and follows `nextCursor` until it is null, until the oldest item on a page is older than `--since`, or until `--max-pages` pages have been fetched.
+
+Output shape with `--all`:
+```json
+{"items": [...], "pages": 3, "nextCursor": null}
+```
+
+Without `--all`, `notes list` behaviour is unchanged (single request to the reader feed).
 
 ## Comment-moderation commands
 
@@ -224,6 +296,7 @@ SUBSTACK_ENABLE_WRITE=true substack comments ban <COMMENT_ID> \
 | `expiry` format | Confirmed enum `1d`/`30d`/`90d`/`1y`/`1000y` from the ban modal's select options. Not yet live-verified. |
 | `commentVisibility` enum | Confirmed `visible` / `delete_this_comment` / `delete_all_comments` from the ban modal's select options. |
 | Host for comment report | Publication host (`charliepgarcia.substack.com`). Notes UI uses `substack.com` — if a comment is on Notes, the CLI may need `--host A` (not yet exposed). |
+| Host for Notes replies | All Notes endpoints (including `notes replies` and `notes list --all`) use `substack.com` (host A) automatically — no `--host` flag needed. |
 | Profile report live response shape | Unknown; the endpoint exists per bundle but has not been called with real credentials. |
 
 ## License

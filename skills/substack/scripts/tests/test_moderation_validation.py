@@ -113,17 +113,24 @@ def test_report_comment_core_rejects_invalid_category(monkeypatch):
     client.post.assert_not_called()
 
 
-def test_report_comment_core_accepts_valid_category(monkeypatch):
+@pytest.mark.parametrize("cat", sorted(VALID_CATEGORIES))
+def test_report_comment_core_accepts_valid_category(monkeypatch, cat):
     """report_comment does NOT raise for a valid category."""
     import substack_cli.moderation_core as m
     monkeypatch.setattr(m, "is_write_enabled", lambda: True)
     client = MagicMock()
     client.post.return_value = {"ok": True}
-    for cat in VALID_CATEGORIES:
-        client.reset_mock()
-        result = report_comment(client, 1, cat, "", True, None, None)
-        assert result == {"ok": True}
-        client.post.assert_called_once()
+    result = report_comment(client, 1, cat, "", True, None, None)
+    assert result == {"ok": True}
+    expected_body = {
+        "reportCategory": cat,
+        "details": "",
+        "reportedToSubstack": True,
+    }
+    client.post.assert_called_once_with(
+        f"/api/v1/comment/1/report",
+        json_body=expected_body,
+    )
 
 
 def test_report_user_profile_core_rejects_invalid_category(monkeypatch):
@@ -136,16 +143,26 @@ def test_report_user_profile_core_rejects_invalid_category(monkeypatch):
     client.post.assert_not_called()
 
 
-def test_report_user_profile_core_accepts_valid_category(monkeypatch):
+@pytest.mark.parametrize("cat", sorted(VALID_CATEGORIES))
+def test_report_user_profile_core_accepts_valid_category(monkeypatch, cat):
     """report_user_profile does NOT raise for valid categories."""
     import substack_cli.moderation_core as m
     monkeypatch.setattr(m, "is_write_enabled", lambda: True)
     client = MagicMock()
     client.post.return_value = {"ok": True}
-    for cat in VALID_CATEGORIES:
-        client.reset_mock()
-        result = report_user_profile(client, 1, cat, "", True, None)
-        assert result == {"ok": True}
+    result = report_user_profile(client, 1, cat, "", True, None)
+    assert result == {"ok": True}
+    expected_body = {
+        "reportCategory": cat,
+        "details": "",
+        "reportedToSubstack": True,
+        "surface": "profile",
+    }
+    client.post.assert_called_once_with(
+        f"/api/v1/users/1/profile/report",
+        host="A",
+        json_body=expected_body,
+    )
 
 
 # ---------------------------------------------------------------------------

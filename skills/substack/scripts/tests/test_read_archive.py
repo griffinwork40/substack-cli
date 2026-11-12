@@ -81,3 +81,54 @@ def test_list_sections_hits_publication_host(fake_cookies, fake_publication_url)
     result = list_sections(client)
     assert route.called
     assert result == [{"id": 1, "name": "Default"}]
+
+
+@respx.mock
+def test_get_archive_omits_offset_when_zero(fake_cookies, fake_publication_url):
+    # Substack (Nov 2026) returns 400 "Invalid value" for any offset param, even 0.
+    route = respx.get(f"{fake_publication_url}/api/v1/archive").mock(
+        return_value=httpx.Response(200, json={"posts": [], "nextCursor": None})
+    )
+    client = SubstackClient(cookies=fake_cookies, publication_url=fake_publication_url)
+    get_archive(client)
+    assert "offset" not in route.calls[0].request.url.params
+
+
+@respx.mock
+def test_get_archive_cursor_passed_through(fake_cookies, fake_publication_url):
+    route = respx.get(f"{fake_publication_url}/api/v1/archive").mock(
+        return_value=httpx.Response(200, json={"posts": [{"id": 2}], "nextCursor": "c2"})
+    )
+    client = SubstackClient(cookies=fake_cookies, publication_url=fake_publication_url)
+    result = get_archive(client, cursor="c1")
+    assert route.calls[0].request.url.params["cursor"] == "c1"
+    assert result == [{"id": 2}]
+    assert route.call_count == 1  # without all_pages, one page only
+
+
+@respx.mock
+def test_get_archive_all_pages_follows_next_cursor(fake_cookies, fake_publication_url):
+    route = respx.get(f"{fake_publication_url}/api/v1/archive").mock(
+        side_effect=[
+            httpx.Response(200, json={"posts": [{"id": 1}, {"id": 2}], "nextCursor": "c1"}),
+            httpx.Response(200, json={"posts": [{"id": 3}], "nextCursor": "c2"}),
+            httpx.Response(200, json={"posts": [], "nextCursor": None}),
+        ]
+    )
+    client = SubstackClient(cookies=fake_cookies, publication_url=fake_publication_url)
+    result = get_archive(client, all_pages=True)
+    assert [p["id"] for p in result] == [1, 2, 3]
+    assert "cursor" not in route.calls[0].request.url.params
+    assert route.calls[1].request.url.params["cursor"] == "c1"
+    assert route.calls[2].request.url.params["cursor"] == "c2"
+
+
+@respx.mock
+def test_get_archive_all_pages_stops_on_repeated_cursor(fake_cookies, fake_publication_url):
+    # A server that keeps returning the same cursor must not loop forever.
+    route = respx.get(f"{fake_publication_url}/api/v1/archive").mock(
+        return_value=httpx.Response(200, json={"posts": [{"id": 1}], "nextCursor": "same"})
+    )
+    client = SubstackClient(cookies=fake_cookies, publication_url=fake_publication_url)
+    get_archive(client, all_pages=True)
+    assert route.call_count == 2
