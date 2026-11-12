@@ -18,6 +18,7 @@ from substack_cli import publish as _publish_module  # noqa: F401
 from substack_cli import manage as _manage_module   # noqa: F401
 from substack_cli import notes as _notes_module     # noqa: F401
 from substack_cli import chat as _chat_module       # noqa: F401
+from substack_cli import users as _users_module     # noqa: F401
 from substack_cli.app import app, config_app, drafts_app
 
 
@@ -28,7 +29,7 @@ def test_help_lists_all_subapps():
     assert result.exit_code == 0
     output = result.output
     for subapp in ["config", "drafts", "comments", "subscribers",
-                   "recommendations", "tags", "publication", "notes", "chat"]:
+                   "recommendations", "tags", "publication", "notes", "chat", "users"]:
         assert subapp in output
 
 
