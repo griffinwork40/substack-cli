@@ -41,6 +41,7 @@ from typing import Any, Optional
 import typer
 from rich.console import Console
 from rich.table import Table
+from rich.text import Text
 
 from substack_cli.app import automations_app
 from substack_cli.auth import AuthError, resolve_cookies, resolve_publication_url
@@ -166,26 +167,34 @@ def order_emails(campaign: dict) -> list:
         e = by_id.get(email_id) or {}
         return (str(e.get("created_at") or ""), str(email_id))
 
+    def edge_key(edge: tuple) -> tuple:
+        return sort_key(edge[0]) + (str(edge[1].get("id") or ""),)
+
     ordered_ids: list = []
     seen: set = set()
-    # Roots: emails whose trigger has no from_email_id.
+    # The trigger the walk actually followed to reach each chained email, so
+    # timing comes from that edge, not from whichever trigger is listed first.
+    reached_by: dict = {}
+    # Roots: emails whose trigger has no from_email_id. Frontier items are
+    # (email_id, trigger) pairs.
     frontier = sorted(
-        (t.get("to_email_id") for t in triggers
+        ((t.get("to_email_id"), t) for t in triggers
          if not t.get("from_email_id") and t.get("to_email_id") in by_id),
-        key=sort_key,
+        key=edge_key,
     )
     while frontier:
-        current = frontier.pop(0)
+        current, via = frontier.pop(0)
         if current in seen:
             continue
         seen.add(current)
+        reached_by[current] = via
         ordered_ids.append(current)
         children = sorted(
-            (t.get("to_email_id") for t in triggers
+            ((t.get("to_email_id"), t) for t in triggers
              if t.get("from_email_id") == current
              and t.get("to_email_id") in by_id
              and t.get("to_email_id") not in seen),
-            key=sort_key,
+            key=edge_key,
         )
         frontier = children + frontier  # depth-first along the chain
     chained = set(ordered_ids)
@@ -195,7 +204,7 @@ def order_emails(campaign: dict) -> list:
     cumulative: dict = {}
     for position, email_id in enumerate(ordered_ids + leftovers, start=1):
         email = by_id[email_id]
-        trig = trigger_to.get(email_id) or {}
+        trig = reached_by.get(email_id) or trigger_to.get(email_id) or {}
         from_id = trig.get("from_email_id")
         delay = trig.get("delay")
         in_chain = email_id in chained
@@ -239,13 +248,20 @@ def summarize_campaign(
     segments_by_id: Optional[dict] = None,
     tags_by_id: Optional[dict] = None,
 ) -> dict:
-    """Project a raw campaign into a readable summary. Missing keys → None."""
+    """Project a raw campaign into a readable summary. Missing keys → None.
+
+    `segments_by_id` / `tags_by_id` may instead be an inline error object
+    (the lookup failed); a campaign that references a segment / tag then
+    gets that error object as `saved_segment` / `subscriber_tag`.
+    """
     segments_by_id = segments_by_id or {}
     tags_by_id = tags_by_id or {}
     seg_id = campaign.get("saved_segment_id")
     tag_id = campaign.get("subscriber_tag_id")
-    seg = segments_by_id.get(seg_id) if seg_id else None
-    tag = tags_by_id.get(tag_id) if tag_id else None
+    seg_failed = bool(seg_id) and _is_error(segments_by_id)
+    tag_failed = bool(tag_id) and _is_error(tags_by_id)
+    seg = segments_by_id.get(seg_id) if seg_id and not seg_failed else None
+    tag = tags_by_id.get(tag_id) if tag_id and not tag_failed else None
     emails = order_emails(campaign)
     return {
         "id": campaign.get("id"),
@@ -268,12 +284,14 @@ def summarize_campaign(
             "section_id": campaign.get("condition_section_id"),
             "saved_segment_id": seg_id,
             "saved_segment": (
-                {k: seg.get(k) for k in ("id", "name", "description", "query")}
+                dict(segments_by_id) if seg_failed
+                else {k: seg.get(k) for k in ("id", "name", "description", "query")}
                 if seg else None
             ),
             "subscriber_tag_id": tag_id,
             "subscriber_tag": (
-                {k: tag.get(k) for k in ("id", "name", "slug")} if tag else None
+                dict(tags_by_id) if tag_failed
+                else {k: tag.get(k) for k in ("id", "name", "slug")} if tag else None
             ),
         },
         "email_count": len(emails),
@@ -401,6 +419,11 @@ def _soft(fn, *args) -> Any:
                 "status_code": getattr(exc, "status_code", None)}
 
 
+def _is_error(value: Any) -> bool:
+    """True for an inline error object as returned by `_soft`."""
+    return isinstance(value, dict) and value.get("error") is True
+
+
 def _index_by_id(items: Any) -> dict:
     if not isinstance(items, list):
         return {}
@@ -408,13 +431,21 @@ def _index_by_id(items: Any) -> dict:
 
 
 def _lookup_tables(client: SubstackClient, campaigns: list) -> tuple:
-    """Fetch segments/tags only if some campaign references them."""
+    """Fetch segments/tags only if some campaign references them.
+
+    Each table is an id → item index, or the inline error object when that
+    lookup failed (so the failure is reported, not hidden as "not found").
+    Non-dict campaign items are ignored.
+    """
+    campaigns = [c for c in campaigns if isinstance(c, dict)]
     segments: Any = {}
     tags: Any = {}
     if any(c.get("saved_segment_id") for c in campaigns):
-        segments = _index_by_id(_soft(list_segments, client))
+        got = _soft(list_segments, client)
+        segments = got if _is_error(got) else _index_by_id(got)
     if any(c.get("subscriber_tag_id") for c in campaigns):
-        tags = _index_by_id(_soft(list_subscriber_tags, client))
+        got = _soft(list_subscriber_tags, client)
+        tags = got if _is_error(got) else _index_by_id(got)
     return segments, tags
 
 
@@ -439,18 +470,61 @@ def _fail(exc: Exception, pretty: bool) -> None:
     emit_error(str(exc), status_code=getattr(exc, "status_code", None), pretty=pretty)
 
 
-def _print_campaign_table(summaries: list) -> None:
+def _failed_cell(err: dict) -> str:
+    status = err.get("status_code")
+    return f"lookup failed (HTTP {status})" if status else "lookup failed"
+
+
+def _estimate_cell(est: Any) -> Text:
+    """Short, markup-safe table cell for an audience-estimate payload."""
+    if _is_error(est):
+        return Text(_failed_cell(est))
+    if not isinstance(est, dict):
+        return Text("-")
+    size = est.get("estimatedAudienceSize")
+    cell = f"{size:,}" if isinstance(size, int) else "unknown"
+    if est.get("windowDays") is not None:
+        cell += f" ({est['windowDays']}d window)"
+    return Text(cell)
+
+
+def _stats_cell(stats: Any) -> Text:
+    """Short, markup-safe table cell for a `_stats_payload` result."""
+    if _is_error(stats):
+        return Text(_failed_cell(stats))
+    if not isinstance(stats, dict):
+        return Text("-")
+    if not stats.get("available"):
+        return Text("not run yet")
+    value = stats.get("stats")
+    if isinstance(value, dict):
+        cell = ", ".join(f"{k}={v}" for k, v in value.items())
+    else:
+        cell = json.dumps(value, ensure_ascii=False)
+    return Text(cell if len(cell) <= 80 else cell[:77] + "...")
+
+
+def _print_campaign_table(summaries: list, details: bool = False) -> None:
     table = Table(title="Automations")
-    for col in ("title", "state", "trigger", "audience", "emails"):
+    columns = ["title", "state", "trigger", "audience", "emails"]
+    if details:
+        columns += ["estimate", "stats"]
+    for col in columns:
         table.add_column(col, overflow="fold")
     for s in summaries:
         aud = s["audience"]
         who = aud.get("subscription_type") or "-"
-        if aud.get("saved_segment"):
+        if _is_error(aud.get("saved_segment")):
+            who += (f" · segment {aud['saved_segment_id']}"
+                    f" ({_failed_cell(aud['saved_segment'])})")
+        elif aud.get("saved_segment"):
             who += f" · segment: {aud['saved_segment'].get('name')}"
         elif aud.get("saved_segment_id"):
             who += f" · segment {aud['saved_segment_id']}"
-        if aud.get("subscriber_tag"):
+        if _is_error(aud.get("subscriber_tag")):
+            who += (f" · tag {aud['subscriber_tag_id']}"
+                    f" ({_failed_cell(aud['subscriber_tag'])})")
+        elif aud.get("subscriber_tag"):
             who += f" · tag: {aud['subscriber_tag'].get('name')}"
         elif aud.get("subscriber_tag_id"):
             who += f" · tag {aud['subscriber_tag_id']}"
@@ -458,8 +532,12 @@ def _print_campaign_table(summaries: list) -> None:
             f"{e['position']}. {e.get('subject')!s} (+{e.get('delay_hours')}h)"
             for e in s["emails"]
         )
-        table.add_row(str(s.get("title")), str(s.get("state")),
-                      s["trigger"]["description"], who, emails or "-")
+        row = [str(s.get("title")), str(s.get("state")),
+               s["trigger"]["description"], who, emails or "-"]
+        if details:
+            row += [_estimate_cell(s.get("audience_estimate")),
+                    _stats_cell(s.get("stats"))]
+        table.add_row(*row)
     _console.print(table)
 
 
@@ -492,7 +570,7 @@ def automations_list_cmd(
                     s["audience_estimate"] = _soft(get_audience_estimate, client, s["id"])
                     s["stats"] = _stats_payload(_soft(get_campaign_stats, client, s["id"]))
         if pretty:
-            _print_campaign_table(summaries)
+            _print_campaign_table(summaries, details=details)
         else:
             output(summaries, pretty=False)
     except (SubstackApiError, AuthError, ValueError) as exc:

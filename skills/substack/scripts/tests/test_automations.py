@@ -182,6 +182,13 @@ def _fast(no_sleep):
 
 
 @pytest.fixture
+def wide_console(monkeypatch):
+    """Render --pretty tables wide enough that cells do not wrap mid-word."""
+    from rich.console import Console
+    monkeypatch.setattr(automations, "_console", Console(stderr=True, width=400))
+
+
+@pytest.fixture
 def client(fake_cookies):
     return SubstackClient(cookies=fake_cookies, publication_url=PUB, min_interval=0)
 
@@ -220,6 +227,26 @@ def test_order_emails_tolerates_cycles_and_missing_keys():
     ordered = order_emails(camp)
     assert [e["id"] for e in ordered] == ["x", "y"]
     assert ordered[1]["cumulative_delay_hours"] is None  # delay missing
+
+
+def _repro_triggers():
+    # Non-root trigger y->x listed first: x must still take its timing from
+    # the root trigger the chain walk followed, not the first one listed.
+    return [{"from_email_id": "y", "to_email_id": "x", "delay": 5},
+            {"from_email_id": None, "to_email_id": "x", "delay": 1},
+            {"from_email_id": "x", "to_email_id": "y", "delay": 2}]
+
+
+@pytest.mark.parametrize("order", [[0, 1, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]])
+def test_order_emails_uses_trigger_the_walk_followed(order):
+    triggers = [_repro_triggers()[i] for i in order]
+    ordered = order_emails({"emails": [{"id": "x"}, {"id": "y"}], "triggers": triggers})
+    x, y = ordered
+    assert (x["id"], y["id"]) == ("x", "y")
+    assert x["after"] == "trigger" and x["from_email_id"] is None
+    assert x["delay_hours"] == 1 and x["cumulative_delay_hours"] == 1
+    assert y["after"] == "previous_email" and y["from_email_id"] == "x"
+    assert y["delay_hours"] == 2 and y["cumulative_delay_hours"] == 3
 
 
 def test_order_emails_empty_campaign():
@@ -398,7 +425,83 @@ def test_cli_list_segment_lookup_failure_is_soft(isolated_config, authed_env, cl
     assert result.exit_code == 0
     data = json.loads(result.stdout)
     assert data[0]["audience"]["saved_segment_id"] == SEG
-    assert data[0]["audience"]["saved_segment"] is None
+    seg = data[0]["audience"]["saved_segment"]
+    assert seg["error"] is True and seg["status_code"] == 403 and seg["message"]
+    # the failing segments lookup does not disturb the tags lookup
+    assert data[0]["audience"]["subscriber_tag"]["name"] == "Example tag"
+
+
+@respx.mock
+def test_cli_list_tag_lookup_failure_is_inline(isolated_config, authed_env, cli_runner):
+    respx.get(f"{PUB}/api/v1/drip-campaigns").mock(
+        return_value=httpx.Response(200, json={"campaigns": [_campaign_b(), _campaign_a()]}))
+    respx.get(f"{PUB}/api/v1/subscriber-stats/saved-segments").mock(
+        return_value=httpx.Response(200, json=SEGMENTS))
+    respx.get(f"{PUB}/api/v1/subscriber-tags").mock(
+        return_value=httpx.Response(403, json={"error": "forbidden"}))
+    result = cli_runner.invoke(automations_app, ["list"])
+    assert result.exit_code == 0
+    b, a = json.loads(result.stdout)
+    assert b["audience"]["subscriber_tag_id"] == TAG
+    tag = b["audience"]["subscriber_tag"]
+    assert tag["error"] is True and tag["status_code"] == 403
+    assert b["audience"]["saved_segment"]["name"] == "Example engaged readers"
+    # a campaign that references no tag/segment is unaffected by the failure
+    assert a["audience"]["subscriber_tag"] is None and a["audience"]["saved_segment"] is None
+
+
+@respx.mock
+def test_cli_get_segment_and_tag_lookup_failures_are_inline(isolated_config, authed_env,
+                                                             cli_runner):
+    respx.get(f"{PUB}/api/v1/drip-campaigns/custom/{CAMP_B}").mock(
+        return_value=httpx.Response(200, json=_campaign_b()))
+    respx.get(f"{PUB}/api/v1/subscriber-stats/saved-segments").mock(
+        return_value=httpx.Response(403, json={"error": "forbidden"}))
+    respx.get(f"{PUB}/api/v1/subscriber-tags").mock(
+        return_value=httpx.Response(500, json={"error": "boom"}))
+    respx.get(f"{PUB}/api/v1/drip-campaigns/{CAMP_B}/stats").mock(
+        return_value=httpx.Response(200, json={"stats": None}))
+    respx.get(f"{PUB}/api/v1/drip-campaigns/{CAMP_B}/audience-estimate").mock(
+        return_value=httpx.Response(200, json={"estimatedAudienceSize": 3}))
+    result = cli_runner.invoke(automations_app, ["get", CAMP_B])
+    assert result.exit_code == 0, result.output
+    aud = json.loads(result.stdout)["audience"]
+    assert aud["saved_segment_id"] == SEG and aud["subscriber_tag_id"] == TAG
+    assert aud["saved_segment"]["error"] is True and aud["saved_segment"]["status_code"] == 403
+    assert aud["subscriber_tag"]["error"] is True and aud["subscriber_tag"]["status_code"] == 500
+
+
+@respx.mock
+def test_cli_get_lookup_success_without_id_match_is_none(isolated_config, authed_env,
+                                                         cli_runner):
+    respx.get(f"{PUB}/api/v1/drip-campaigns/custom/{CAMP_B}").mock(
+        return_value=httpx.Response(200, json=_campaign_b()))
+    respx.get(f"{PUB}/api/v1/subscriber-stats/saved-segments").mock(
+        return_value=httpx.Response(200, json={"segments": []}))
+    respx.get(f"{PUB}/api/v1/subscriber-tags").mock(
+        return_value=httpx.Response(200, json={"tags": []}))
+    respx.get(f"{PUB}/api/v1/drip-campaigns/{CAMP_B}/stats").mock(
+        return_value=httpx.Response(200, json={"stats": None}))
+    respx.get(f"{PUB}/api/v1/drip-campaigns/{CAMP_B}/audience-estimate").mock(
+        return_value=httpx.Response(200, json={}))
+    aud = json.loads(cli_runner.invoke(automations_app, ["get", CAMP_B]).stdout)["audience"]
+    assert aud["saved_segment"] is None and aud["subscriber_tag"] is None
+
+
+@respx.mock
+def test_cli_list_pretty_segment_failure_shows_id_not_none(isolated_config, authed_env,
+                                                           cli_runner, wide_console):
+    respx.get(f"{PUB}/api/v1/drip-campaigns").mock(
+        return_value=httpx.Response(200, json={"campaigns": [_campaign_b()]}))
+    respx.get(f"{PUB}/api/v1/subscriber-stats/saved-segments").mock(
+        return_value=httpx.Response(403, json={"error": "forbidden"}))
+    respx.get(f"{PUB}/api/v1/subscriber-tags").mock(
+        return_value=httpx.Response(200, json=TAGS))
+    result = cli_runner.invoke(automations_app, ["list", "--pretty"])
+    assert result.exit_code == 0
+    out = " ".join(result.output.split())
+    assert "segment: None" not in out
+    assert f"segment {SEG}" in out and "lookup failed" in out
 
 
 @respx.mock
@@ -419,11 +522,70 @@ def test_cli_list_details_and_raw(isolated_config, authed_env, cli_runner):
 
 
 @respx.mock
-def test_cli_list_pretty_renders_table(isolated_config, authed_env, cli_runner):
+def test_cli_list_skips_non_dict_campaign_items(isolated_config, authed_env, cli_runner):
+    respx.get(f"{PUB}/api/v1/drip-campaigns").mock(
+        return_value=httpx.Response(200, json={"campaigns": [None, _campaign_b()]}))
+    respx.get(f"{PUB}/api/v1/subscriber-stats/saved-segments").mock(
+        return_value=httpx.Response(200, json=SEGMENTS))
+    respx.get(f"{PUB}/api/v1/subscriber-tags").mock(
+        return_value=httpx.Response(200, json=TAGS))
+    result = cli_runner.invoke(automations_app, ["list"])
+    assert result.exit_code == 0, result.output
+    data = json.loads(result.stdout)
+    assert len(data) == 1 and data[0]["id"] == CAMP_B
+    assert data[0]["audience"]["saved_segment"]["name"] == "Example engaged readers"
+    raw = json.loads(cli_runner.invoke(automations_app, ["list", "--raw"]).stdout)
+    assert raw[0] is None and raw[1]["id"] == CAMP_B
+
+
+@respx.mock
+def test_cli_list_pretty_renders_table(isolated_config, authed_env, cli_runner, wide_console):
     respx.get(f"{PUB}/api/v1/drip-campaigns").mock(
         return_value=httpx.Response(200, json={"campaigns": [_campaign_a()]}))
     result = cli_runner.invoke(automations_app, ["list", "--pretty"])
     assert result.exit_code == 0
+    # Rich table goes to stderr; CliRunner's result.output carries it.
+    assert "First email" in result.output
+    assert "estimate" not in result.output and "stats" not in result.output
+    assert len(respx.calls) == 1  # no --details: no estimate/stats GETs
+
+
+@respx.mock
+def test_cli_list_details_pretty_shows_estimate_and_stats(isolated_config, authed_env,
+                                                          cli_runner, wide_console):
+    camp_c = _campaign_a()
+    camp_c["id"] = "cccccccc-0000-4000-8000-000000000003"
+    camp_c["title"] = "Third automation"
+    respx.get(f"{PUB}/api/v1/drip-campaigns").mock(
+        return_value=httpx.Response(200, json={"campaigns": [_campaign_a(), camp_c]}))
+    respx.get(f"{PUB}/api/v1/drip-campaigns/{CAMP_A}/audience-estimate").mock(
+        return_value=httpx.Response(200, json={"estimatedAudienceSize": 4321, "windowDays": 30,
+                                               "hasSegment": False, "updatedAt": "x"}))
+    respx.get(f"{PUB}/api/v1/drip-campaigns/{CAMP_A}/stats").mock(
+        return_value=httpx.Response(200, json={"stats": None}))
+    respx.get(f"{PUB}/api/v1/drip-campaigns/{camp_c['id']}/audience-estimate").mock(
+        return_value=httpx.Response(200, json={"estimatedAudienceSize": None, "windowDays": None,
+                                               "hasSegment": False, "updatedAt": "x"}))
+    respx.get(f"{PUB}/api/v1/drip-campaigns/{camp_c['id']}/stats").mock(
+        return_value=httpx.Response(503, json={"error": "[bold]down[/bold]"}))
+    camp_d = _campaign_a()
+    camp_d["id"] = "dddddddd-0000-4000-8000-000000000004"
+    respx.get(f"{PUB}/api/v1/drip-campaigns").mock(
+        return_value=httpx.Response(200, json={"campaigns": [_campaign_a(), camp_c, camp_d]}))
+    respx.get(f"{PUB}/api/v1/drip-campaigns/{camp_d['id']}/audience-estimate").mock(
+        return_value=httpx.Response(500, json={"error": "boom"}))
+    respx.get(f"{PUB}/api/v1/drip-campaigns/{camp_d['id']}/stats").mock(
+        return_value=httpx.Response(200, json={"stats": {"sent": 10, "note": "[red]x[/red]"}}))
+    result = cli_runner.invoke(automations_app, ["list", "--details", "--pretty"])
+    assert result.exit_code == 0, result.output
+    out = " ".join(result.output.split())
+    assert "lookup failed (HTTP 500)" in out  # erroring estimate → error cell
+    assert "sent=10" in out and "note=[red]x[/red]" in out  # server text is not markup
+    assert "estimate" in out and "stats" in out
+    assert "4,321" in out and "not run yet" in out
+    assert "unknown" in out  # null estimate renders readably
+    assert "lookup failed (HTTP 503)" in out  # erroring stats → error cell
+    assert "None" not in out and "'error'" not in out
 
 
 @respx.mock
