@@ -1,7 +1,7 @@
 ---
 name: substack
 allowed-tools: Bash, Read, Write, Edit
-description: "CLI wrapper for Substack's unofficial private API — read publication content (archive, posts, RSS feed, comments, search, analytics) and manage a publication you own (create/edit/publish/schedule drafts, moderate comments, manage subscribers, recommendations, and tags), and post/reply-to/list/delete Substack Notes (Substack's micro-blog surface; note that the API has no note-editing endpoint — notes publish immediately), and read (READ-ONLY) Substack Chat — list threads, list replies/sub-replies, and check unread counts; Chat endpoints are community-reported and never live-verified, and there is no write support (no send/reply/delete). Triggers on requests to check a Substack newsletter's archive or posts, pull post analytics or subscriber counts, draft or publish a Substack post, schedule a newsletter, reply to or moderate Substack comments, post, reply to, or delete a Substack Note, check Substack Chat threads/replies/unread counts, or manage a Substack publication programmatically. Examples: what did I publish on Substack this month, draft a new Substack post, how many subscribers does my newsletter have, schedule my Substack post for Friday, reply to comments on my latest post, post a Substack Note, reply to that Substack note, delete my last note, list my Substack Chat threads, how many unread Substack chats do I have. Requires SUBSTACK_COOKIES_STRING (session cookie) for any authenticated operation; read-only public endpoints (archive, post, feed) work without auth. Write operations additionally require SUBSTACK_ENABLE_WRITE=true."
+description: "CLI wrapper for Substack's unofficial private API — read publication content (archive, posts, RSS feed, comments, search, analytics) and manage a publication you own (create/edit/publish/schedule drafts, moderate comments, manage subscribers, recommendations, and tags), and post/reply-to/list/delete Substack Notes (Substack's micro-blog surface; note that the API has no note-editing endpoint — notes publish immediately), and read (READ-ONLY) Substack Automations — email sequences, their ordered emails and text, audience estimates, stats, saved segments and subscriber tags (no edit/start/send) — and read (READ-ONLY) Substack Chat — list threads, list replies/sub-replies, and check unread counts; Chat endpoints are community-reported and never live-verified, and there is no write support (no send/reply/delete). Triggers on requests to check a Substack newsletter's archive or posts, pull post analytics or subscriber counts, draft or publish a Substack post, schedule a newsletter, reply to or moderate Substack comments, post, reply to, or delete a Substack Note, check Substack Chat threads/replies/unread counts, review Substack Automations (email sequences / drip campaigns), their emails, audience and saved segments, or manage a Substack publication programmatically. Examples: what did I publish on Substack this month, draft a new Substack post, how many subscribers does my newsletter have, schedule my Substack post for Friday, reply to comments on my latest post, post a Substack Note, reply to that Substack note, delete my last note, list my Substack Chat threads, how many unread Substack chats do I have, which Substack automations are running, what does my welcome email sequence say. Requires SUBSTACK_COOKIES_STRING (session cookie) for any authenticated operation; read-only public endpoints (archive, post, feed) work without auth. Write operations additionally require SUBSTACK_ENABLE_WRITE=true."
 ---
 
 # substack — Substack CLI (unofficial API)
@@ -194,6 +194,39 @@ profile/self` returns your *user* id, a different number. Find your
 publication id via your browser's DevTools Network tab while viewing your
 publication's Chat tab, and pass it explicitly.
 
+### Automations (read-only)
+
+Substack Automations are publication email sequences ("drip campaigns" in
+the API). These commands are **GET only** — there is no command to edit,
+start, stop, delete, duplicate, or send (including preview sends) an
+automation, or to change saved segments or subscriber tags. All endpoints
+were live-verified (2026-11) and are on the publication host; auth required.
+
+```bash
+substack automations list                       # every automation: state, running, trigger, audience, emails in send order
+substack automations list --details             # + audience estimate and stats per automation (2 GETs each)
+substack automations list --pretty              # human table
+substack automations list --raw                 # API campaign objects unmodified
+substack automations get <CAMPAIGN_ID>          # one automation: segment query, tag, ordered emails, estimate, stats
+substack automations get <CAMPAIGN_ID> --bodies # + every email's plain text (1 GET per email)
+substack automations email <CAMPAIGN_ID> <EMAIL_ID>                  # {subject, text, word_count}
+substack automations email <CAMPAIGN_ID> <EMAIL_ID> --format text    # plain text, links kept as [text](url)
+substack automations email <CAMPAIGN_ID> <EMAIL_ID> --format raw     # API response (ProseMirror JSON string body)
+substack automations stats <CAMPAIGN_ID>        # {"available": false, "stats": null} until it has run
+substack automations audience <CAMPAIGN_ID>     # {estimatedAudienceSize, windowDays, hasSegment, updatedAt}
+substack automations segments                   # saved subscriber segments with their filter query
+substack automations segment <SEGMENT_ID>       # one segment + its count
+substack automations subscriber-tags            # subscriber tags (not post tags; see `tags list`)
+```
+
+Emails are ordered by the trigger chain (`from_email_id` → `to_email_id`),
+not by the API's unordered arrays. Each email carries `after` (`trigger` or
+`previous_email`), `delay_hours`, and `cumulative_delay_hours` from the
+automation's trigger. Unknown trigger types and missing fields are reported,
+not errors. In `list`/`get`, a failing secondary lookup (segments, tags,
+stats, estimate, one email's text) is shown inline as an error object
+instead of aborting the command.
+
 ### Subscribers
 
 ```bash
@@ -277,6 +310,8 @@ answer per-subscriber questions about a publication you don't own; only
 else needs a numeric id from `substack categories`. **`chat` is read-only
 and unverified** — all four Chat endpoints are community-reported, never
 confirmed against the live API, and there is no `publication_id` resolver
-(`chat list` requires you to supply `--publication-id` yourself). No write
+(`chat list` requires you to supply `--publication-id` yourself). **`automations` is read-only** —
+no edit/start/stop/delete/duplicate/preview-send commands exist, and the
+stats shape for a running automation has not been observed. No write
 support exists for Chat (send/reply/delete/react/settings) or for DMs at
 all (no endpoints implemented).

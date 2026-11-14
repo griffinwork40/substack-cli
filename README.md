@@ -42,6 +42,7 @@ substack --help
 - **Moderation:** manage comments and reactions — create, delete, react, **read who liked a comment or note reply** (`comments reactions`), report spam/impersonation, ban commenters, and look up existing bans.
 - **Notes:** create, list (paginated `--all` with `--since` + `--max-pages`), read, delete, and **fetch replies** (`notes replies --all --descendants`) on Substack Notes. All Notes endpoints use `substack.com` (host A), not the publication subdomain.
 - **Audience:** manage subscribers, cross-publication recommendations, and post tags.
+- **Automations (read-only):** list a publication's Automations (email sequences, which the API calls "drip campaigns"), whether each is running, who it targets (subscription type, trigger, saved segment and its filter query, subscriber tag), its emails in send order with delays, each email's text (plain text with links kept, or raw ProseMirror), Substack's audience estimate, and stats; plus saved subscriber segments and subscriber tags. `substack automations --help`. GET only: nothing that edits, starts, or sends.
 - **Analytics:** per-post and publication-level stats.
 - **Machine-friendly:** compact JSON to stdout by default (`--pretty` for a Rich table/panel); errors are JSON on stderr with a nonzero exit code.
 
