@@ -311,6 +311,30 @@ def test_parse_inline_unmatched_asterisks_pass_through_as_text():
     assert "marks" not in nodes[0]
 
 
+def test_parse_inline_four_asterisk_run_passes_through_as_literal_text():
+    """****word**** is not meaningful Markdown; must pass through as one plain-text
+    node with no marks and no stray '*' fragments (issue #66, item 1).
+
+    Before fix:
+        [{"type": "text", "text": "*bold", "marks": [strong, em]},
+         {"type": "text", "text": "*"}]
+    After fix:
+        [{"type": "text", "text": "****bold****"}]
+    """
+    nodes = _parse_inline("****bold****")
+
+    assert len(nodes) == 1
+    assert nodes[0] == {"type": "text", "text": "****bold****"}
+
+
+def test_parse_inline_four_asterisk_run_no_stray_asterisk_fragments():
+    """No node in the result of a 4-asterisk run should be a bare '*' text node."""
+    nodes = _parse_inline("****bold****")
+
+    for node in nodes:
+        assert node.get("text") != "*", f"stray asterisk node found: {nodes}"
+
+
 # ---------------------------------------------------------------------------
 # create_draft — direct unit tests for body_markdown and body_json paths
 # ---------------------------------------------------------------------------
