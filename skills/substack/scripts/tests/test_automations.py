@@ -304,14 +304,31 @@ def test_prosemirror_to_text_edge_inputs():
     assert prosemirror_to_text({"type": "doc", "content": None}) == "\n"
 
 
-def test_email_text_payload_counts_words_and_tolerates_bad_input():
+def test_email_text_payload_counts_words():
     p = email_text_payload(EMAIL_RESPONSE, CAMP_A, E1)
     assert p["subject"] == "First email" and p["word_count"] > 5
-    empty = email_text_payload(None, CAMP_A, E1)
-    assert empty["text"] == "" and empty["subject"] is None and empty["word_count"] == 0
 
 
-@pytest.mark.parametrize("bad", ["a/b", "../x", "a?b", "a#b", "a\\b", ""])
+def test_email_text_payload_raises_on_bad_input():
+    """email_text_payload must raise ValueError for unrecognised response shapes."""
+    with pytest.raises(ValueError):
+        email_text_payload(None, CAMP_A, E1)
+    with pytest.raises(ValueError):
+        email_text_payload([], CAMP_A, E1)
+    with pytest.raises(ValueError):
+        email_text_payload({}, CAMP_A, E1)  # dict with neither key
+    # A dict with drip_campaign_title but no body is accepted (title-only response)
+    p = email_text_payload({"drip_campaign_title": "Hi"}, CAMP_A, E1)
+    assert p["subject"] == "Hi" and p["text"] == ""
+
+
+@pytest.mark.parametrize("bad", [
+    "a/b", "../x", "a?b", "a#b", "a\\b", "",
+    "%2f",    # percent-encoded slash
+    "%2e%2e", # percent-encoded ..
+    ".",      # single dot
+    "a b",    # space
+])
 def test_ids_are_validated_before_any_request(client, bad):
     with pytest.raises(ValueError):
         get_campaign(client, bad)
@@ -380,10 +397,10 @@ def test_root_help_lists_automations(cli_runner):
 
 
 def test_module_registers_no_write_verbs():
-    """Guard: the module must never call client.post/put/delete/patch."""
+    """Guard: the module must never call client.post/put/delete/patch/request/send."""
     import inspect
     src = inspect.getsource(automations)
-    for verb in (".post(", ".put(", ".delete(", ".patch(", "_request("):
+    for verb in (".post(", ".put(", ".delete(", ".patch(", "_request(", ".request(", ".send("):
         assert verb not in src
 
 
@@ -570,6 +587,8 @@ def test_cli_list_details_pretty_shows_estimate_and_stats(isolated_config, authe
         return_value=httpx.Response(503, json={"error": "[bold]down[/bold]"}))
     camp_d = _campaign_a()
     camp_d["id"] = "dddddddd-0000-4000-8000-000000000004"
+    # Note: the drip-campaigns list route was already registered above with two campaigns;
+    # re-registering here overwrites it to include camp_d as well (second mock wins).
     respx.get(f"{PUB}/api/v1/drip-campaigns").mock(
         return_value=httpx.Response(200, json={"campaigns": [_campaign_a(), camp_c, camp_d]}))
     respx.get(f"{PUB}/api/v1/drip-campaigns/{camp_d['id']}/audience-estimate").mock(
@@ -706,3 +725,127 @@ def test_cli_invalid_id_is_json_error_with_no_request(isolated_config, authed_en
     with respx.mock(assert_all_called=False) as mock:
         result = cli_runner.invoke(automations_app, ["stats", "../etc"])
         assert result.exit_code == 1 and len(mock.calls) == 0
+
+
+@respx.mock
+def test_cli_list_limit_caps_output(isolated_config, authed_env, cli_runner):
+    """--limit N truncates the output to at most N summaries."""
+    respx.get(f"{PUB}/api/v1/drip-campaigns").mock(
+        return_value=httpx.Response(200, json={"campaigns": [_campaign_a(), _campaign_b()]}))
+    respx.get(f"{PUB}/api/v1/subscriber-stats/saved-segments").mock(
+        return_value=httpx.Response(200, json=SEGMENTS))
+    respx.get(f"{PUB}/api/v1/subscriber-tags").mock(
+        return_value=httpx.Response(200, json=TAGS))
+    result = cli_runner.invoke(automations_app, ["list", "--limit", "1"])
+    assert result.exit_code == 0, result.output
+    data = json.loads(result.stdout)
+    assert len(data) == 1 and data[0]["id"] == CAMP_A
+
+
+@respx.mock
+def test_cli_list_pretty_tag_failure_shows_id_not_none(isolated_config, authed_env,
+                                                       cli_runner, wide_console):
+    """Companion to the segment-failure pretty test: tag lookup 403 must render
+    as 'tag <id> (lookup failed ...)' not 'tag: None'."""
+    respx.get(f"{PUB}/api/v1/drip-campaigns").mock(
+        return_value=httpx.Response(200, json={"campaigns": [_campaign_b()]}))
+    respx.get(f"{PUB}/api/v1/subscriber-stats/saved-segments").mock(
+        return_value=httpx.Response(200, json=SEGMENTS))
+    respx.get(f"{PUB}/api/v1/subscriber-tags").mock(
+        return_value=httpx.Response(403, json={"error": "forbidden"}))
+    result = cli_runner.invoke(automations_app, ["list", "--pretty"])
+    assert result.exit_code == 0
+    out = " ".join(result.output.split())
+    assert "tag: None" not in out
+    assert f"tag {TAG}" in out and "lookup failed" in out
+
+
+def test_prosemirror_bullet_list_with_nested_content():
+    """bullet_list items whose body contains nested content (e.g. a sub-paragraph)
+    must be re-indented with three spaces, not collapsed onto one line."""
+    doc = {
+        "type": "doc",
+        "content": [{
+            "type": "bullet_list",
+            "content": [
+                {"type": "list_item", "content": [
+                    {"type": "paragraph", "content": [{"type": "text", "text": "Top item"}]},
+                    {"type": "bullet_list", "content": [
+                        {"type": "list_item", "content": [
+                            {"type": "paragraph", "content": [{"type": "text", "text": "Nested"}]}
+                        ]}
+                    ]},
+                ]},
+                {"type": "list_item", "content": [
+                    {"type": "paragraph", "content": [{"type": "text", "text": "Second"}]}
+                ]},
+            ],
+        }],
+    }
+    text = prosemirror_to_text(doc)
+    # Top-level item present
+    assert "- Top item" in text
+    # Nested bullet re-indented with three spaces
+    assert "   - Nested" in text
+    # Second top-level item present
+    assert "- Second" in text
+
+
+@respx.mock
+def test_soft_error_sentinel_not_in_json_output(isolated_config, authed_env, cli_runner):
+    """The __soft_error__ sentinel must never appear in JSON output."""
+    respx.get(f"{PUB}/api/v1/drip-campaigns").mock(
+        return_value=httpx.Response(200, json={"campaigns": [_campaign_b()]}))
+    respx.get(f"{PUB}/api/v1/subscriber-stats/saved-segments").mock(
+        return_value=httpx.Response(403, json={"error": "forbidden"}))
+    respx.get(f"{PUB}/api/v1/subscriber-tags").mock(
+        return_value=httpx.Response(403, json={"error": "forbidden"}))
+    result = cli_runner.invoke(automations_app, ["list"])
+    assert result.exit_code == 0
+    raw = result.stdout
+    assert "__soft_error__" not in raw
+    data = json.loads(raw)
+    assert data[0]["audience"]["saved_segment"]["error"] is True
+    assert data[0]["audience"]["subscriber_tag"]["error"] is True
+
+
+@respx.mock
+def test_cli_email_raises_on_unrecognized_response(isolated_config, authed_env, cli_runner):
+    """automations email must exit non-zero when the response is not a recognised shape."""
+    respx.get(f"{PUB}/api/v1/drip-campaigns/{CAMP_A}/email/{E1}").mock(
+        return_value=httpx.Response(200, json=["unexpected", "list"]))
+    result = cli_runner.invoke(automations_app, ["email", CAMP_A, E1])
+    assert result.exit_code == 1
+    err = json.loads(result.stderr.strip().splitlines()[0])
+    assert err["error"] is True
+
+
+@respx.mock
+def test_pretty_emails_cell_no_noneh(isolated_config, authed_env, cli_runner, wide_console):
+    """Emails with delay_hours=None must show '(not in chain)' not '(+Noneh)'."""
+    camp = _campaign_a()
+    # Add an email with no trigger (not in chain) → delay_hours will be None
+    camp["emails"].append(_email("orphan99", CAMP_A, "Orphan email", "2024-01-01T00:00:00.000Z"))
+    respx.get(f"{PUB}/api/v1/drip-campaigns").mock(
+        return_value=httpx.Response(200, json={"campaigns": [camp]}))
+    result = cli_runner.invoke(automations_app, ["list", "--pretty"])
+    assert result.exit_code == 0
+    assert "+Noneh" not in result.output
+    assert "not in chain" in result.output
+
+
+@respx.mock
+def test_pretty_error_cell_includes_message_when_no_status(isolated_config, authed_env,
+                                                            cli_runner, wide_console):
+    """When a lookup fails with no HTTP status, _failed_cell appends the message."""
+    from substack_cli.automations import _failed_cell, _SOFT_ERROR_SENTINEL  # noqa: F401
+    # Test _failed_cell directly
+    err_no_status = {_SOFT_ERROR_SENTINEL: True, "error": True,
+                     "message": "Connection refused by host", "status_code": None}
+    cell = _failed_cell(err_no_status)
+    assert cell.startswith("lookup failed")
+    assert "Connection refused" in cell
+    # With a status code the message is not appended
+    err_with_status = {_SOFT_ERROR_SENTINEL: True, "error": True,
+                       "message": "forbidden", "status_code": 403}
+    assert _failed_cell(err_with_status) == "lookup failed (HTTP 403)"
