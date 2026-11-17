@@ -31,15 +31,25 @@ from substack_cli.models import extract_list
 
 
 def _parse_inline(text: str) -> list:
-    """Parse inline markdown (bold, italic, links) into ProseMirror text nodes."""
+    """Parse inline markdown (bold, italic, links) into ProseMirror text nodes.
+
+    Supported delimiters: ``*italic*``, ``**bold**``, ``***bold italic***``,
+    and ``[text](url)`` links.  Runs of four or more consecutive asterisks
+    (e.g. ``****word****``) are **not** meaningful Markdown and are passed
+    through as literal text unchanged.  Code, images, footnotes, and all
+    other Markdown syntax are outside the scope of this parser.
+    """
     nodes: list = []
-    # Combined regex: ***bold italic*** must come before **bold** so the
-    # triple-delimiter is consumed as a unit and not mis-parsed as bold("*…").
+    # Negative lookbehind/lookahead on each delimiter so that a run of 4+
+    # asterisks does NOT match any of the three patterns — it falls through
+    # and is emitted as plain text.  The triple-star alternative still comes
+    # first so that "***x***" is consumed as bold+italic rather than being
+    # mis-parsed as bold("*x*") by the double-star branch.
     pattern = re.compile(
-        r"\*\*\*(.+?)\*\*\*"  # bold+italic (must precede **)
-        r"|\*\*(.+?)\*\*"  # bold
-        r"|\*(.+?)\*"  # italic
-        r"|\[(.+?)\]\((.+?)\)",  # link
+        r"(?<!\*)\*\*\*(?!\*)(.+?)(?<!\*)\*\*\*(?!\*)"  # bold+italic (not 4+)
+        r"|(?<!\*)\*\*(?!\*)(.+?)(?<!\*)\*\*(?!\*)"      # bold (not 3+)
+        r"|(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)"          # italic (not 2+)
+        r"|\[(.+?)\]\((.+?)\)",                           # link
     )
     pos = 0
     for m in pattern.finditer(text):
@@ -184,6 +194,10 @@ def create_draft(
     """Create a new draft. The draft_body MUST be a JSON string (per
     Substack's undocumented API), never a nested dict."""
     # Resolve body
+    if body_markdown is not None and body_json is not None:
+        raise ValueError(
+            "create_draft: supply at most one of body_markdown and body_json"
+        )
     draft_body: Optional[str] = None
     if body_markdown is not None:
         doc = _markdown_to_prosemirror_doc(body_markdown)

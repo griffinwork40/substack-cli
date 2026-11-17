@@ -849,3 +849,88 @@ def test_pretty_error_cell_includes_message_when_no_status(isolated_config, auth
     err_with_status = {_SOFT_ERROR_SENTINEL: True, "error": True,
                        "message": "forbidden", "status_code": 403}
     assert _failed_cell(err_with_status) == "lookup failed (HTTP 403)"
+
+
+# ---------------------------------------------------------------------------
+# Issue #69 — Rich markup escaping in _print_campaign_table
+# ---------------------------------------------------------------------------
+
+def _minimal_summary(title: str, state: str = "started") -> dict:
+    """Minimal summarize_campaign-shaped dict for _print_campaign_table."""
+    return {
+        "title": title,
+        "state": state,
+        "running": state == "started",
+        "trigger": {"description": "subscription (free)"},
+        "audience": {"subscription_type": "free"},
+        "emails": [{"position": 1, "subject": "Hello [part 1]", "delay_hours": 0}],
+    }
+
+
+def test_print_campaign_table_bracketed_text_appears_verbatim():
+    """Titles/states/etc with [part 1]-style text must render verbatim."""
+    from io import StringIO
+    from rich.console import Console
+    from substack_cli import automations as auto_module
+
+    buf = StringIO()
+    orig_console = auto_module._console
+    auto_module._console = Console(file=buf, highlight=False, width=200)
+    try:
+        auto_module._print_campaign_table([_minimal_summary("Welcome [part 1]")])
+    finally:
+        auto_module._console = orig_console
+
+    rendered = buf.getvalue()
+    assert "Welcome [part 1]" in rendered
+    # email subject with brackets must also survive
+    assert "Hello [part 1]" in rendered
+
+
+def test_print_campaign_table_unmatched_closing_tag_does_not_raise():
+    """A title containing [/x] must not raise MarkupError."""
+    from io import StringIO
+    from rich.console import Console
+    from substack_cli import automations as auto_module
+
+    buf = StringIO()
+    orig_console = auto_module._console
+    auto_module._console = Console(file=buf, highlight=False, width=200)
+    try:
+        auto_module._print_campaign_table([_minimal_summary("a [/x] b")])
+    finally:
+        auto_module._console = orig_console
+
+    rendered = buf.getvalue()
+    assert "a [/x] b" in rendered
+
+
+def test_print_campaign_table_bracketed_error_message_in_who_renders_verbatim():
+    """_failed_cell output embedded in the audience 'who' cell can carry
+    API error text with brackets (e.g. '[details]'). Text(...) wrapping
+    must prevent Rich from interpreting them as markup."""
+    from io import StringIO
+    from rich.console import Console
+    from substack_cli import automations as auto_module
+    from substack_cli.automations import _SOFT_ERROR_SENTINEL
+
+    summary = _minimal_summary("Test campaign")
+    summary["audience"]["saved_segment_id"] = "seg_999"
+    summary["audience"]["saved_segment"] = {
+        _SOFT_ERROR_SENTINEL: True,
+        "error": True,
+        "message": "denied [details]",
+        "status_code": None,
+    }
+
+    buf = StringIO()
+    orig_console = auto_module._console
+    auto_module._console = Console(file=buf, highlight=False, width=200)
+    try:
+        auto_module._print_campaign_table([summary])
+    finally:
+        auto_module._console = orig_console
+
+    rendered = buf.getvalue()
+    # The bracketed text must survive verbatim, not be swallowed by Rich
+    assert "denied [details]" in rendered

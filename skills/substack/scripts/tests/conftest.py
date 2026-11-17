@@ -8,6 +8,31 @@ that isolation.
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _isolated_impersonation_state(tmp_path, monkeypatch):
+    """Redirect impersonation STATE_DIR and SEEN_FILE to a tmp directory.
+
+    Applies to every test automatically so no test can write to the real
+    ~/.afk/state/impersonation/ directory.
+
+    Two patches are required:
+    - substack_cli.impersonation_state: the canonical definition of the constants
+      (used by _load_seen, _save_seen, _write_summary directly).
+    - substack_cli.impersonation: imports STATE_DIR by value at import time
+      (``from substack_cli.impersonation_state import ... STATE_DIR``),
+      so the copy bound in that module's namespace must also be redirected.
+    """
+    import substack_cli.impersonation_state as _state_mod
+    import substack_cli.impersonation as _scan_mod
+
+    fake_state_dir = tmp_path / "impersonation_state"
+    fake_seen_file = fake_state_dir / "seen.json"
+
+    monkeypatch.setattr(_state_mod, "STATE_DIR", fake_state_dir)
+    monkeypatch.setattr(_state_mod, "SEEN_FILE", fake_seen_file)
+    monkeypatch.setattr(_scan_mod, "STATE_DIR", fake_state_dir)
+
+
 @pytest.fixture
 def isolated_config(tmp_path, monkeypatch):
     """Redirects config.CONFIG_PATH to a tmp file and clears SUBSTACK_* env

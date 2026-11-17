@@ -8,6 +8,7 @@ import httpx
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
+from rich.text import Text
 
 from substack_cli.auth import build_headers, cookie_expiry_hint, redact
 from substack_cli.models import extract_list, extract_pagination_meta
@@ -325,7 +326,7 @@ def output_list(data: Any, pretty: bool, title: str = "Results") -> None:
             for key in items[0]:
                 table.add_column(key, overflow="fold")
             for row in items:
-                table.add_row(*[str(row.get(k, "")) for k in items[0]])
+                table.add_row(*[Text(str(row.get(k, ""))) for k in items[0]])
             _console.print(table)
         else:
             _console.print(Panel(json.dumps(items, indent=2, ensure_ascii=False), title=title))
