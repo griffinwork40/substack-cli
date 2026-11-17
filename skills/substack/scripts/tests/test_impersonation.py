@@ -850,7 +850,7 @@ class TestRunScanArchiveCall:
 
     def test_no_extra_request_when_server_overdelivers_with_next_cursor(self):
         """When a page fills post_limit AND the server still returns a nextCursor,
-        no extra request must fire (finding #59 fix: break after slice)."""
+        no extra request must fire (fix #59: break after slice)."""
         from substack_cli.impersonation import run_scan
 
         # Server over-delivers 25 items for a post_limit=10 request,
@@ -896,4 +896,62 @@ class TestRunScanArchiveCall:
 
         assert result["posts_scanned"] == 5, (
             f"expected 5 posts_scanned from bare-list response, got {result['posts_scanned']}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Item 2 — Notes feed request is made with correct path and limit
+# ---------------------------------------------------------------------------
+
+class TestNotesFeedRequest:
+    """run_scan fetches the Notes feed via the correct path and passes the limit."""
+
+    def _make_env(self):
+        return {k: v for k, v in os.environ.items() if k != "SUBSTACK_ENABLE_WRITE"}
+
+    def test_notes_feed_request_path_and_limit(self):
+        """notes_limit=1 → GET /api/v1/reader/feed/profile/{REAL_CHARLIE_USER_ID}
+        with limit=1; notes_scanned reflects the returned item."""
+        from substack_cli.impersonation import run_scan
+        from substack_cli.impersonation_detect import REAL_CHARLIE_USER_ID
+
+        expected_path = f"/api/v1/reader/feed/profile/{REAL_CHARLIE_USER_ID}"
+
+        # One note item with a valid entity_key and no children (no replies to scan)
+        note_item = {
+            "entity_key": "c-99",
+            "item": {"comment": {}, "children": []},
+        }
+
+        calls = []
+
+        def _side_effect(path, **kw):
+            calls.append((path, kw))
+            if path == expected_path:
+                return [note_item]
+            return []
+
+        client = mock.MagicMock()
+        client.get.side_effect = _side_effect
+
+        with mock.patch.dict(os.environ, self._make_env(), clear=True):
+            with mock.patch("substack_cli.impersonation.time.sleep"):
+                result = run_scan(client, post_limit=0, notes_limit=1, dry_run=True)
+
+        # Verify the feed request was made
+        feed_calls = [(p, kw) for p, kw in calls if p == expected_path]
+        assert feed_calls, (
+            f"Expected a GET to {expected_path!r} but no such call was made. "
+            f"All calls: {[p for p, _ in calls]}"
+        )
+
+        # Verify limit kwarg was passed correctly
+        _, feed_kw = feed_calls[0]
+        assert feed_kw.get("limit") == 1, (
+            f"Expected limit=1 on notes feed request, got {feed_kw!r}"
+        )
+
+        # Verify the item was counted
+        assert result["notes_scanned"] == 1, (
+            f"Expected notes_scanned=1, got {result['notes_scanned']}"
         )
