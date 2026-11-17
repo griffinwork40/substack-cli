@@ -91,6 +91,7 @@ def users_block_cmd(
     """
     if not is_write_enabled():
         emit_error("Write operations require SUBSTACK_ENABLE_WRITE=true", pretty=pretty)
+        return
 
     try:
         path = BLOCK_PATH.format(user_id=user_id)
@@ -135,6 +136,7 @@ def users_unblock_cmd(
     """
     if not is_write_enabled():
         emit_error("Write operations require SUBSTACK_ENABLE_WRITE=true", pretty=pretty)
+        return
 
     try:
         path = BLOCK_PATH.format(user_id=user_id)

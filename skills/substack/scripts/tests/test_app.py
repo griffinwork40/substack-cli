@@ -29,7 +29,8 @@ def test_help_lists_all_subapps():
     assert result.exit_code == 0
     output = result.output
     for subapp in ["config", "drafts", "comments", "subscribers",
-                   "recommendations", "tags", "publication", "notes", "chat", "users"]:
+                   "recommendations", "tags", "publication", "notes", "chat", "users",
+                   "automations"]:
         assert subapp in output
 
 
