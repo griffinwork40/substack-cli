@@ -370,3 +370,51 @@ def test_output_list_normalizes_envelope_before_pretty_printing(capsys):
     captured = capsys.readouterr()
     parsed = json.loads(captured.out.strip())
     assert parsed == [1, 2, 3]
+
+
+# ---------------------------------------------------------------------------
+# Issue #69 — Rich markup escaping in --pretty tables
+# ---------------------------------------------------------------------------
+
+def test_output_list_pretty_bracketed_text_appears_verbatim(capsys):
+    """Cells with [part 1]-style text must not be silently dropped."""
+    from io import StringIO
+    from rich.console import Console
+    from substack_cli import client as client_module
+
+    buf = StringIO()
+    orig_console = client_module._console
+    client_module._console = Console(file=buf, highlight=False, width=200)
+    try:
+        output_list(
+            [{"title": "Welcome [part 1]", "state": "active"}],
+            pretty=True,
+            title="Test",
+        )
+    finally:
+        client_module._console = orig_console
+
+    rendered = buf.getvalue()
+    assert "[part 1]" in rendered
+
+
+def test_output_list_pretty_unmatched_closing_tag_does_not_raise(capsys):
+    """A cell containing [/x] must not raise MarkupError."""
+    from io import StringIO
+    from rich.console import Console
+    from substack_cli import client as client_module
+
+    buf = StringIO()
+    orig_console = client_module._console
+    client_module._console = Console(file=buf, highlight=False, width=200)
+    try:
+        output_list(
+            [{"title": "a [/x] b", "state": "active"}],
+            pretty=True,
+            title="Test",
+        )
+    finally:
+        client_module._console = orig_console
+
+    rendered = buf.getvalue()
+    assert "a [/x] b" in rendered

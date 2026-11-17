@@ -532,8 +532,8 @@ def _print_campaign_table(summaries: list, details: bool = False) -> None:
             f"{e['position']}. {e.get('subject')!s} (+{e.get('delay_hours')}h)"
             for e in s["emails"]
         )
-        row = [str(s.get("title")), str(s.get("state")),
-               s["trigger"]["description"], who, emails or "-"]
+        row = [Text(str(s.get("title"))), Text(str(s.get("state"))),
+               Text(s["trigger"]["description"]), Text(who), Text(emails or "-")]
         if details:
             row += [_estimate_cell(s.get("audience_estimate")),
                     _stats_cell(s.get("stats"))]
