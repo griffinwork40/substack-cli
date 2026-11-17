@@ -50,7 +50,10 @@ from substack_cli.models import extract_list
 
 _console = Console(stderr=True)
 
-_UNSAFE_ID_CHARS = set("/\\?#")
+import re as _re
+
+# Allowlist for id values put into URL path segments.
+_ID_RE = _re.compile(r"[A-Za-z0-9_-]+")
 
 # Known trigger types → short human description. Anything else is reported
 # as-is (never an error) so a new Substack trigger type cannot crash a read.
@@ -62,10 +65,10 @@ _TRIGGER_LABELS = {
 
 
 def _validate_id(value: str, name: str) -> str:
-    """Reject ids that could escape the URL path segment they are put in."""
+    """Allowlist ids put into URL path segments (alphanumeric, hyphen, underscore)."""
     value = str(value)
-    if not value or ".." in value or _UNSAFE_ID_CHARS.intersection(value):
-        raise ValueError(f"Invalid {name} {value!r}: must be a plain id.")
+    if not _ID_RE.fullmatch(value):
+        raise ValueError(f"Invalid {name} {value!r}: must be a plain id (letters, digits, hyphens, underscores only).")
     return value
 
 
@@ -168,7 +171,13 @@ def order_emails(campaign: dict) -> list:
         return (str(e.get("created_at") or ""), str(email_id))
 
     def edge_key(edge: tuple) -> tuple:
-        return sort_key(edge[0]) + (str(edge[1].get("id") or ""),)
+        t = edge[1]
+        return (
+            sort_key(edge[0])
+            + (str(t.get("id") or ""),)
+            + (str(t.get("from_email_id") or ""),)
+            + (str(t.get("delay") if t.get("delay") is not None else ""),)
+        )
 
     ordered_ids: list = []
     seen: set = set()
@@ -394,8 +403,18 @@ def prosemirror_to_text(body: Any) -> str:
 
 
 def email_text_payload(raw: Any, campaign_id: str, email_id: str) -> dict:
-    """Turn the per-email API response into `{subject, text, word_count, ...}`."""
-    raw = raw if isinstance(raw, dict) else {}
+    """Turn the per-email API response into `{subject, text, word_count, ...}`.
+
+    Raises ValueError when the response is not a dict or carries neither
+    drip_campaign_body nor drip_campaign_title, to avoid silently returning
+    an empty payload for an unrecognized response shape.
+    """
+    if not isinstance(raw, dict) or (
+        "drip_campaign_body" not in raw and "drip_campaign_title" not in raw
+    ):
+        raise ValueError(
+            f"Unrecognized email response for {campaign_id}/{email_id}: {type(raw).__name__!r}"
+        )
     text = prosemirror_to_text(raw.get("drip_campaign_body"))
     return {
         "campaign_id": campaign_id,
@@ -406,22 +425,50 @@ def email_text_payload(raw: Any, campaign_id: str, email_id: str) -> dict:
     }
 
 
+# Sentinel key added to every _soft error object so _is_error can test
+# object identity rather than the value of "error" (which could collide with
+# a real response field).  The key is stripped before JSON output.
+_SOFT_ERROR_SENTINEL = "__soft_error__"
+
+
 def _soft(fn, *args) -> Any:
     """Call a read and return its result, or an inline error object.
 
     Used for secondary lookups (stats, estimate, segments, tags) so one
     failing endpoint does not hide the rest of a campaign's details.
+    The returned error object carries a private sentinel key so _is_error
+    can distinguish it from a real response dict that happens to have
+    ``"error": true``.
     """
     try:
         return fn(*args)
     except (SubstackApiError, ValueError) as exc:
-        return {"error": True, "message": str(exc),
-                "status_code": getattr(exc, "status_code", None)}
+        return {
+            _SOFT_ERROR_SENTINEL: True,
+            "error": True,
+            "message": str(exc),
+            "status_code": getattr(exc, "status_code", None),
+        }
 
 
 def _is_error(value: Any) -> bool:
     """True for an inline error object as returned by `_soft`."""
-    return isinstance(value, dict) and value.get("error") is True
+    return isinstance(value, dict) and value.get(_SOFT_ERROR_SENTINEL) is True
+
+
+def _strip_sentinels(value: Any) -> Any:
+    """Recursively remove the private sentinel key from all nested dicts.
+
+    Call this on the full data structure just before JSON serialisation so
+    the sentinel never appears in command output.  The in-memory dicts
+    retain the sentinel so _is_error keeps working through the pipeline.
+    """
+    if isinstance(value, dict):
+        return {k: _strip_sentinels(v) for k, v in value.items()
+                if k != _SOFT_ERROR_SENTINEL}
+    if isinstance(value, list):
+        return [_strip_sentinels(i) for i in value]
+    return value
 
 
 def _index_by_id(items: Any) -> dict:
@@ -450,8 +497,8 @@ def _lookup_tables(client: SubstackClient, campaigns: list) -> tuple:
 
 
 def _stats_payload(raw: Any) -> dict:
-    if isinstance(raw, dict) and raw.get("error") is True:
-        return raw
+    if _is_error(raw):
+        return raw  # sentinel stripped at output time
     stats = raw.get("stats") if isinstance(raw, dict) and "stats" in raw else raw
     return {"available": stats is not None, "stats": stats}
 
@@ -472,7 +519,11 @@ def _fail(exc: Exception, pretty: bool) -> None:
 
 def _failed_cell(err: dict) -> str:
     status = err.get("status_code")
-    return f"lookup failed (HTTP {status})" if status else "lookup failed"
+    if status:
+        return f"lookup failed (HTTP {status})"
+    msg = err.get("message") or ""
+    suffix = f": {msg[:40]}" if msg else ""
+    return f"lookup failed{suffix}"
 
 
 def _estimate_cell(est: Any) -> Text:
@@ -528,10 +579,12 @@ def _print_campaign_table(summaries: list, details: bool = False) -> None:
             who += f" · tag: {aud['subscriber_tag'].get('name')}"
         elif aud.get("subscriber_tag_id"):
             who += f" · tag {aud['subscriber_tag_id']}"
-        emails = "\n".join(
-            f"{e['position']}. {e.get('subject')!s} (+{e.get('delay_hours')}h)"
-            for e in s["emails"]
-        )
+        def _email_line(e: dict) -> str:
+            dh = e.get("delay_hours")
+            delay = f"+{dh}h" if dh is not None else "not in chain"
+            return f"{e['position']}. {e.get('subject')!s} ({delay})"
+
+        emails = "\n".join(_email_line(e) for e in s["emails"])
         row = [Text(str(s.get("title"))), Text(str(s.get("state"))),
                Text(s["trigger"]["description"]), Text(who), Text(emails or "-")]
         if details:
@@ -547,6 +600,11 @@ def automations_list_cmd(
         False, "--details",
         help="Also fetch each campaign's audience estimate and stats (2 extra GETs per campaign).",
     ),
+    limit: Optional[int] = typer.Option(
+        None, "--limit",
+        help="Maximum number of automations to show (applied after sorting). "
+             "Useful with --details to bound the 2 extra GETs per campaign.",
+    ),
     raw: bool = typer.Option(False, "--raw", help="Print the API's campaign objects unmodified."),
     pretty: bool = False,
 ):
@@ -554,25 +612,31 @@ def automations_list_cmd(
 
     READ-ONLY. GET /api/v1/drip-campaigns, plus saved segments / subscriber
     tags when a campaign references one (to show the segment name + query).
+    With --details, 2 extra GETs are made per automation shown.
     """
     try:
         client = _make_client()
         campaigns = list_campaigns(client)
         if raw:
-            output(campaigns, pretty=pretty)
+            output(campaigns[:limit] if limit is not None else campaigns, pretty=pretty)
             return
         segments, tags = _lookup_tables(client, campaigns)
         summaries = [summarize_campaign(c, segments, tags) for c in campaigns
                      if isinstance(c, dict)]
+        if limit is not None:
+            summaries = summaries[:limit]
         if details:
-            for s in summaries:
+            total = len(summaries)
+            for i, s in enumerate(summaries, start=1):
                 if s.get("id"):
+                    if pretty:
+                        _console.print(f"[dim]Fetching details {i}/{total}…[/dim]")
                     s["audience_estimate"] = _soft(get_audience_estimate, client, s["id"])
                     s["stats"] = _stats_payload(_soft(get_campaign_stats, client, s["id"]))
         if pretty:
             _print_campaign_table(summaries, details=details)
         else:
-            output(summaries, pretty=False)
+            output(_strip_sentinels(summaries), pretty=False)
     except (SubstackApiError, AuthError, ValueError) as exc:
         _fail(exc, pretty)
     except Exception as exc:
@@ -614,13 +678,13 @@ def automations_get_cmd(
                 if not email.get("id"):
                     continue
                 got = _soft(get_campaign_email, client, campaign_id, email["id"])
-                if isinstance(got, dict) and got.get("error") is True:
+                if _is_error(got):
                     email["text_error"] = got
                 else:
                     payload = email_text_payload(got, campaign_id, email["id"])
                     email["text"] = payload["text"]
                     email["word_count"] = payload["word_count"]
-        output(summary, pretty=pretty)
+        output(_strip_sentinels(summary), pretty=pretty)
     except (SubstackApiError, AuthError, ValueError) as exc:
         _fail(exc, pretty)
     except Exception as exc:
@@ -652,7 +716,7 @@ def automations_email_cmd(
         if fmt == "raw":
             output(got, pretty=pretty)
             return
-        payload = email_text_payload(got, campaign_id, email_id)
+        payload = email_text_payload(got, campaign_id, email_id)  # raises on bad shape
         if fmt == "text":
             subject = payload.get("subject")
             print((f"Subject: {subject}\n\n" if subject else "") + payload["text"], end="")
