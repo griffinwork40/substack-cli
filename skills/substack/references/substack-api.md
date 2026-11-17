@@ -77,6 +77,14 @@ research (all ~55 discovered endpoints), see
 | `chat replies` | GET | `/api/v1/community/posts/{thread_id}/comments` | A | Yes | **Community-reported, never live-verified** | Always sends `order=asc&initial=true`. Optional `--before-id`/`--after-id`/`--limit` are None-filtered locally before the request (client.py's own None-stripping only catches a wholly-empty params dict). Response cursor fields are reported as `moreBefore`/`moreAfter` — NOT `hasMore`/`nextCursor`, so `extract_pagination_meta` is intentionally not used; cursors pass through untouched. |
 | `chat sub-replies` | GET | `/api/v1/community/comments/{comment_id}/comments` | A | Yes | **Community-reported, never live-verified** | Sibling of `chat replies` one level deeper (replies to a reply). Same params/pagination behavior. |
 | `chat unread` | GET | `/api/v1/messages/unread-count` | A | Yes | **Community-reported, never live-verified** | Known field: `pubChatUnreadCount`. `--pretty` surfaces it as a bespoke highlighted line (not via the shared `output()` helper, to avoid widening that helper's blast radius across all other commands) before the full render. |
+| `automations list` | GET | `/api/v1/drip-campaigns` | P | Yes | **Live-verified (2026-11)** | `{"campaigns": [...]}`. Each campaign carries `emails[]` (unordered; `body` is only an `s3://` pointer) and `triggers[]` (`from_email_id` null for the first email, `to_email_id`, `delay` in **hours**, `condition`). CLI orders emails by walking the trigger chain. `state` seen: `stopped`, `started`. `trigger_type` seen: `subscription`, `before_renewal`, `reading_activity`; `trigger_config` null or e.g. `{"delay_days": N}` / `{"threshold": N, "window_days": N}`. Also fetches saved segments / subscriber tags when a campaign references one. |
+| `automations get` | GET | `/api/v1/drip-campaigns/custom/{campaign_id}` | P | Yes | **Live-verified (2026-11)** | One campaign, same keys as the list item (bare object). Combined with `…/audience-estimate`, `…/stats`, and (with `--bodies`) `…/email/{email_id}`. |
+| `automations email` | GET | `/api/v1/drip-campaigns/{campaign_id}/email/{email_id}` | P | Yes | **Live-verified (2026-11)** | `{"drip_campaign_title": <subject>, "drip_campaign_body": <ProseMirror doc as a JSON **string**>}` — the only place an automation email's text is available. CLI renders plain text (links as `[text](url)`) or `--format raw`. |
+| `automations stats` | GET | `/api/v1/drip-campaigns/{campaign_id}/stats` | P | Yes | **Live-verified (never-run campaigns only)** | `{"stats": null}` for a campaign that has never run. Shape for a running campaign **not observed** — passed through as-is under `{"available", "stats"}`. |
+| `automations audience` | GET | `/api/v1/drip-campaigns/{campaign_id}/audience-estimate` | P | Yes | **Live-verified (2026-11)** | `{"estimatedAudienceSize": int\|null, "windowDays": int\|null, "hasSegment": bool, "updatedAt": iso}`. |
+| `automations segments` | GET | `/api/v1/subscriber-stats/saved-segments` | P | Yes | **Live-verified (2026-11)** | `{"segments": [...]}`; each `{id (int), name, description, query, publication_id, created_by_user_id, created_at, updated_at}`. `query` is a filter dict (e.g. `subscription_type`, `subscription_interval`, `activity_rating_gte`/`_lt`, `total_revenue_generated`, `subscription_created_at_lt`, `tag_ids_includes_any`/`_none`). |
+| `automations segment` | GET | `/api/v1/subscriber-stats/saved-segments/{segment_id}` | P | Yes | **Live-verified (2026-11)** | `{"segment": {...}, "count": int}`, passed through. |
+| `automations subscriber-tags` | GET | `/api/v1/subscriber-tags` | P | Yes | **Live-verified (2026-11)** | `{"tags": [{id (int), name, slug, publication_id, created_by_user_id, created_at, updated_at}]}`. Subscriber tags, distinct from post tags (`tags list`). |
 
 ## Rate Limits
 
@@ -155,11 +163,35 @@ thread, reply, delete, react, lock, ban, etc.) but every one of those
 endpoints is unverified, and a wrong guess would mutate state visible to
 real, paying subscribers with no undo. None of that is implemented.
 
+## Automations — read-only by design
+
+Substack "Automations" (email sequences) are "drip campaigns" in the API.
+The `automations` commands issue GET requests only. The same family has
+write/send endpoints, found in the Substack dashboard's JavaScript. They are
+**known and deliberately not implemented** — each one edits, starts, or
+deletes a live email sequence, or sends email, with no undo:
+
+| Method | Path | Effect |
+|---|---|---|
+| PUT | `/api/v1/drip-campaigns/{id}` | Edits a campaign; also how a campaign is started |
+| POST | `/api/v1/drip-campaigns/{id}/trigger-and-email` | Adds an email (and its trigger) to a campaign |
+| PUT / DELETE | `/api/v1/drip-campaigns/{id}/trigger[/{trigger_id}]` | Changes an email's timing / removes an email |
+| POST | `/api/v1/drip-campaigns/{id}/email/{email_id}/preview` | **Sends** a preview email |
+| POST | `/api/v1/drip-campaigns/custom` | Creates a campaign |
+| DELETE | `/api/v1/drip-campaigns/custom/{id}` | Deletes a campaign |
+| POST | `/api/v1/drip-campaigns/custom/{id}/duplicate` | Duplicates a campaign |
+| POST / PATCH / DELETE | `/api/v1/subscriber-stats/saved-segments[/{id}]` | Creates / edits / deletes a saved segment |
+| POST / PATCH / DELETE | `/api/v1/subscriber-tags[/{id}]` | Creates / edits / deletes a subscriber tag |
+
+Guessed names `/api/v1/automations`, `/api/v1/campaigns`, and
+`/api/v1/publication/automations` return 404/403 — use `drip-campaigns`.
+
 ## Deferred / Out of Scope for v1
 
 - Substack Notes **editing** — Notes CRUD + replies are implemented (`notes create`/`reply`/`list`/`get`/`delete`), but there is **no edit/update endpoint for published notes** and no undo. The only "edit" is delete-then-recreate (which yields a new id). Draft/scheduled notes (`--draft`, `--schedule`) can be edited before publishing, via the web composer's Drafts tab.
 - Full Markdown→ProseMirror (lists, images-in-body, footnotes, paywall markers, embeds)
 - **Chat writes** (send/reply/delete/react/lock/ban/settings) — reads only (`chat list`/`replies`/`sub-replies`/`unread`) are implemented; see the confidence caveat above.
+- **Automation writes** (edit/start/stop, add/retime/remove emails, preview-send, create/duplicate/delete, segment and subscriber-tag CRUD) — reads only; see § Automations above.
 - **DMs** — no endpoints implemented at all (read or write).
 - Stripe/pledges
 - Cross-publication discovery of **category-level rankings** is now supported via `leaderboard` (see § Category Leaderboard). Still out of scope: arbitrary per-subscriber / per-post data for publications you don't own — the leaderboard endpoint only exposes the same aggregate, banded fields Substack shows publicly on its own category pages.

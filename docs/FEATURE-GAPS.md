@@ -146,6 +146,17 @@ exist; published posts are only reachable via the public `read archive`. A `coun
 view is a small addition.
 **Module:** `read.py` / `publish.py`. **Confidence: med.**
 
+### 12. Automations (email sequences / "drip campaigns") — read ✅ *(ADDED 2026-11-14, read-only)*
+New `automations` subapp (`automations.py`): `list`, `get`, `email`, `stats`, `audience`,
+`segments`, `segment`, `subscriber-tags` — all GET, all live-verified. Emails are ordered by the
+trigger chain; email bodies render from ProseMirror to plain text.
+**Still a gap, deliberately:** every automation write — `PUT /drip-campaigns/{id}` (edit/start),
+`POST …/trigger-and-email`, `PUT`/`DELETE …/trigger[/{id}]`, `POST …/email/{eid}/preview` (sends
+email), `POST /drip-campaigns/custom`, `DELETE …/custom/{id}`, `POST …/custom/{id}/duplicate`, and
+`POST`/`PATCH`/`DELETE` on saved segments and subscriber tags. Known (dashboard JS), not built:
+each mutates a live email sequence or sends mail. See `references/substack-api.md` § Automations.
+**Unverified:** the `stats` shape for a campaign that has run (only `{"stats": null}` observed).
+
 ---
 
 ## Tier 3 — Lower confidence / declared out-of-scope / upstream-unverified

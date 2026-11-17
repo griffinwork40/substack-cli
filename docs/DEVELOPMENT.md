@@ -30,6 +30,7 @@ ln -s "$(pwd)/substack" /usr/local/bin/substack
 | `publish.py` | Draft CRUD, publish/schedule lifecycle, image upload, MD→ProseMirror | `client.py`, `app.py` (registers commands) |
 | `manage.py` | Comments, reactions, subscribers, recommendations, tags, pub settings | `client.py`, `app.py` (registers commands) |
 | `notes.py` | Substack Notes CRUD (create/list/get/delete) + note bodyJson builder | `client.py`, `app.py`, `publish.py` (reuses `_parse_inline`) |
+| `automations.py` | READ-ONLY Automations (drip campaigns), saved segments, subscriber tags; trigger-chain email ordering; ProseMirror → text | `client.py`, `app.py` (registers commands) |
 | `app.py` | Root Typer app, subapp wiring, `config test` command, `main()` error wrapper | all (composition root) |
 
 ## Import Graph

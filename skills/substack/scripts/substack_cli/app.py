@@ -24,6 +24,11 @@ users_app = typer.Typer(
     help="User-level actions: block, unblock, list blocks.",
     no_args_is_help=True,
 )
+automations_app = typer.Typer(
+    help="Automations (email sequences / drip campaigns), saved segments and "
+    "subscriber tags — READ-ONLY (GET only; no edit/start/stop/send).",
+    no_args_is_help=True,
+)
 
 app.add_typer(config_app, name="config")
 app.add_typer(drafts_app, name="drafts")
@@ -35,6 +40,7 @@ app.add_typer(publication_app, name="publication")
 app.add_typer(notes_app, name="notes")
 app.add_typer(chat_app, name="chat")
 app.add_typer(users_app, name="users")
+app.add_typer(automations_app, name="automations")
 
 
 # --- config test command (lives here, not in config.py, because it needs
