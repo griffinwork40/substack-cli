@@ -20,6 +20,10 @@ chat_app = typer.Typer(
     "Community-reported endpoints, never live-verified; no write commands.",
     no_args_is_help=True,
 )
+users_app = typer.Typer(
+    help="User-level actions: block, unblock, list blocks.",
+    no_args_is_help=True,
+)
 automations_app = typer.Typer(
     help="Automations (email sequences / drip campaigns), saved segments and "
     "subscriber tags — READ-ONLY (GET only; no edit/start/stop/send).",
@@ -35,6 +39,7 @@ app.add_typer(tags_app, name="tags")
 app.add_typer(publication_app, name="publication")
 app.add_typer(notes_app, name="notes")
 app.add_typer(chat_app, name="chat")
+app.add_typer(users_app, name="users")
 app.add_typer(automations_app, name="automations")
 
 
