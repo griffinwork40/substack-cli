@@ -20,10 +20,9 @@ chat_app = typer.Typer(
     "Community-reported endpoints, never live-verified; no write commands.",
     no_args_is_help=True,
 )
-# Defined here (not in moderation.py) so moderation_hidden_cmd.py can import
-# it without creating a circular dependency with moderation.py.
-moderation_app = typer.Typer(
-    help="Comment moderation helpers: report categories, delete reasons, AutoMod hidden.",
+automations_app = typer.Typer(
+    help="Automations (email sequences / drip campaigns), saved segments and "
+    "subscriber tags — READ-ONLY (GET only; no edit/start/stop/send).",
     no_args_is_help=True,
 )
 
@@ -36,7 +35,7 @@ app.add_typer(tags_app, name="tags")
 app.add_typer(publication_app, name="publication")
 app.add_typer(notes_app, name="notes")
 app.add_typer(chat_app, name="chat")
-app.add_typer(moderation_app, name="moderation")
+app.add_typer(automations_app, name="automations")
 
 
 # --- config test command (lives here, not in config.py, because it needs
