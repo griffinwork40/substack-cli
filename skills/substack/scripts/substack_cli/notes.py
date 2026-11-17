@@ -193,10 +193,10 @@ def _text_to_note_doc(text: str) -> dict:
     """Build a Note `bodyJson` ProseMirror document from plain text.
 
     Blank lines split paragraphs; within a paragraph, [text](url) links are
-    parsed via the shared `_parse_inline` helper. **bold** and *italic* marks
-    are stripped with a warning — the Notes API rejects `strong`/`em` marks
-    (500 on POST /api/v1/comment/draft, issue #31). Raises ValueError on
-    empty text.
+    parsed via the shared `_parse_inline` helper. **bold**, *italic*, and
+    ***bold italic*** marks are stripped with a warning — the Notes API rejects
+    `strong` and `em` marks (500 on POST /api/v1/comment/draft, issue #31).
+    Only ``link`` marks survive. Raises ValueError on empty text.
     """
     blocks = [b.strip() for b in re.split(r"\n\s*\n", text.strip()) if b.strip()]
     if not blocks:

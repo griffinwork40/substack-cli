@@ -83,6 +83,23 @@ def test_text_to_note_doc_strips_italic(capsys):
     assert "em" in captured.err
 
 
+def test_text_to_note_doc_strips_bold_italic_combined(capsys):
+    """***bold italic*** produces a node with both strong and em in _parse_inline,
+    but _text_to_note_doc must strip both marks — the Notes API rejects them
+    (issue #66, item 2).  The text itself is preserved as plain text."""
+    doc = _text_to_note_doc("***bold italic***")
+    nodes = doc["content"][0]["content"]
+    assert len(nodes) == 1
+    node = nodes[0]
+    assert node["text"] == "bold italic"
+    assert "marks" not in node or not any(
+        m["type"] in ("strong", "em") for m in node.get("marks", [])
+    )
+    captured = capsys.readouterr()
+    # Both mark types should be warned about
+    assert "strong" in captured.err or "em" in captured.err
+
+
 def test_text_to_note_doc_empty_raises():
     with pytest.raises(ValueError):
         _text_to_note_doc("   \n\n  ")
