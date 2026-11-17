@@ -375,3 +375,33 @@ def test_create_draft_no_body_sends_null_draft_body(fake_cookies, fake_publicati
 
     sent = json.loads(route.calls[0].request.content)
     assert sent.get("draft_body") is None
+
+
+def test_create_draft_raises_when_both_body_markdown_and_body_json_supplied(
+    fake_cookies, fake_publication_url
+):
+    """Supplying both body_markdown and body_json must raise ValueError (issue #44 item 3)."""
+    client = SubstackClient(cookies=fake_cookies, publication_url=fake_publication_url)
+    with pytest.raises(ValueError, match="body_markdown"):
+        create_draft(
+            client,
+            title="Conflict test",
+            body_markdown="hello",
+            body_json=json.dumps({"type": "doc", "content": []}),
+            byline_ids=[{"id": 1, "is_guest": False}],
+        )
+
+
+def test_markdown_to_prosemirror_setext_heading_not_supported():
+    """Single-dash setext underline (Title\\n-) is NOT parsed as a heading by the
+    minimal Markdown converter; both lines become plain paragraph text nodes.
+    This documents the current behaviour so a future change is caught (issue #44 item 3)."""
+    doc = _markdown_to_prosemirror_doc("Title\n-")
+    # Expect a single paragraph containing both lines as text nodes — no heading node.
+    assert doc["type"] == "doc"
+    assert len(doc["content"]) == 1
+    node = doc["content"][0]
+    assert node["type"] == "paragraph"
+    texts = [n["text"] for n in node["content"]]
+    assert "Title" in texts
+    assert "-" in texts
