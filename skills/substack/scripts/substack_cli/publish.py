@@ -184,6 +184,10 @@ def create_draft(
     """Create a new draft. The draft_body MUST be a JSON string (per
     Substack's undocumented API), never a nested dict."""
     # Resolve body
+    if body_markdown is not None and body_json is not None:
+        raise ValueError(
+            "create_draft: supply at most one of body_markdown and body_json"
+        )
     draft_body: Optional[str] = None
     if body_markdown is not None:
         doc = _markdown_to_prosemirror_doc(body_markdown)
