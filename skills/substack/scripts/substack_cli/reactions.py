@@ -1,4 +1,4 @@
-"""Substack CLI — comment reactions: read who liked a comment or note reply.
+"""Substack CLI — comment reactions: read who reacted to a comment or note reply.
 
 The same endpoint serves both post comments and Notes/note replies:
 
@@ -33,10 +33,11 @@ Response shape (array of reactor objects):
     ]
 
 Projected output fields (--full returns the raw reactor objects):
-    user_id, name, handle (primary_publication.subdomain), photo_url, writes
+    user_id, name, handle (primary_publication.subdomain), has_publication, photo_url, writes
 """
 from __future__ import annotations
 
+import sys
 from typing import Any, List
 
 import typer
@@ -89,6 +90,11 @@ def get_comment_reactors(
         for key in ("reactors", "users", "items", "data"):
             if key in result and isinstance(result[key], list):
                 return result[key]
+    # Unknown shape — warn so callers can distinguish from "no reactors"
+    sys.stderr.write(
+        f"reactions: unrecognized response shape (type={type(result).__name__!r}),"
+        " returning empty list\n"
+    )
     return []
 
 
@@ -96,11 +102,13 @@ def _project_reactor(reactor: Any) -> dict:
     """Project a raw reactor object to the fields useful for scam detection."""
     if not isinstance(reactor, dict):
         return {}
-    pub = reactor.get("primary_publication") or {}
+    pub = reactor.get("primary_publication")
+    pub_dict = pub or {}
     return {
         "user_id": reactor.get("id"),
         "name": reactor.get("name"),
-        "handle": pub.get("subdomain"),
+        "handle": pub_dict.get("subdomain"),
+        "has_publication": pub is not None,
         "photo_url": reactor.get("photo_url"),
         "writes": reactor.get("writes"),
     }
@@ -142,7 +150,7 @@ def comments_reactions_cmd(
     ),
     pretty: bool = typer.Option(False, "--pretty"),
 ):
-    """List users who liked (reacted to) a comment or note reply.
+    """List users who reacted to a comment or note reply.
 
     Calls GET /api/v1/comment/{comment_id}/reactors and returns each
     reactor's user_id, name, handle (Substack subdomain), photo_url, and
@@ -158,7 +166,6 @@ def comments_reactions_cmd(
             f"Invalid --surface {surface!r}. Must be 'publication' or 'notes'.",
             pretty=pretty,
         )
-        return
     try:
         client = _make_client()
         reactors = get_comment_reactors(client, comment_id, surface=surface)
