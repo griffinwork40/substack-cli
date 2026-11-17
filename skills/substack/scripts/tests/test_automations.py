@@ -706,3 +706,57 @@ def test_cli_invalid_id_is_json_error_with_no_request(isolated_config, authed_en
     with respx.mock(assert_all_called=False) as mock:
         result = cli_runner.invoke(automations_app, ["stats", "../etc"])
         assert result.exit_code == 1 and len(mock.calls) == 0
+
+
+# ---------------------------------------------------------------------------
+# Issue #69 — Rich markup escaping in _print_campaign_table
+# ---------------------------------------------------------------------------
+
+def _minimal_summary(title: str, state: str = "started") -> dict:
+    """Minimal summarize_campaign-shaped dict for _print_campaign_table."""
+    return {
+        "title": title,
+        "state": state,
+        "running": state == "started",
+        "trigger": {"description": "subscription (free)"},
+        "audience": {"subscription_type": "free"},
+        "emails": [{"position": 1, "subject": "Hello [part 1]", "delay_hours": 0}],
+    }
+
+
+def test_print_campaign_table_bracketed_text_appears_verbatim():
+    """Titles/states/etc with [part 1]-style text must render verbatim."""
+    from io import StringIO
+    from rich.console import Console
+    from substack_cli import automations as auto_module
+
+    buf = StringIO()
+    orig_console = auto_module._console
+    auto_module._console = Console(file=buf, highlight=False, width=200)
+    try:
+        auto_module._print_campaign_table([_minimal_summary("Welcome [part 1]")])
+    finally:
+        auto_module._console = orig_console
+
+    rendered = buf.getvalue()
+    assert "Welcome [part 1]" in rendered
+    # email subject with brackets must also survive
+    assert "Hello [part 1]" in rendered
+
+
+def test_print_campaign_table_unmatched_closing_tag_does_not_raise():
+    """A title containing [/x] must not raise MarkupError."""
+    from io import StringIO
+    from rich.console import Console
+    from substack_cli import automations as auto_module
+
+    buf = StringIO()
+    orig_console = auto_module._console
+    auto_module._console = Console(file=buf, highlight=False, width=200)
+    try:
+        auto_module._print_campaign_table([_minimal_summary("a [/x] b")])
+    finally:
+        auto_module._console = orig_console
+
+    rendered = buf.getvalue()
+    assert "a [/x] b" in rendered
