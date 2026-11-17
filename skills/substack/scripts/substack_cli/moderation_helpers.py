@@ -57,7 +57,7 @@ from substack_cli.moderation_core import (
 import typer
 
 moderation_app = typer.Typer(
-    help="Comment moderation helpers: report categories, delete reasons.",
+    help="Comment moderation helpers: report categories, delete reasons, AutoMod hidden.",
     no_args_is_help=True,
 )
 app.add_typer(moderation_app, name="moderation")

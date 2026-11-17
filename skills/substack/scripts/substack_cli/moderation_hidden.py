@@ -1,8 +1,9 @@
 """Substack CLI — AutoMod hidden-comment core logic (Issue #29).
 
-Pure functions only — no Typer commands.  The CLI command is registered in
-moderation.py to avoid the circular-import that would arise if this module
-imported moderation_app from moderation.py while moderation.py imports this.
+Pure functions only — no Typer commands.  The CLI command lives in
+moderation_hidden_cmd.py, which registers `hidden` on the single
+``moderation_app`` defined in moderation_helpers.py (imported by moderation.py
+for its registration side-effect).
 
 ENDPOINT STATUS: **Unverified**.
 The best-evidenced candidate path is:
@@ -27,6 +28,7 @@ implemented until the endpoint is confirmed.
 from __future__ import annotations
 
 import datetime
+import sys
 from typing import Optional
 
 from substack_cli.client import SubstackClient
@@ -165,7 +167,6 @@ def get_hidden_comments(
                 items = raw[key]
                 break
         else:
-            import sys
             known = ("comments", "hidden_comments", "items", "results", "data")
             print(
                 f"Warning: unrecognised API envelope (keys: {list(raw.keys())!r}); "
@@ -188,7 +189,6 @@ def get_hidden_comments(
 
         # Warn if the filter had no effect because no items have timestamps
         if projected and all(p.get("hidden_at") is None for p in projected):
-            import sys
             print(
                 "Warning: --since filter is set but all items have no hidden_at "
                 "timestamp; filter had no effect.",
@@ -196,7 +196,6 @@ def get_hidden_comments(
             )
 
     if len(projected) == limit:
-        import sys
         print(
             f"Note: result count equals --limit ({limit}); there may be more items.",
             file=sys.stderr,
